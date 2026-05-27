@@ -1,0 +1,23 @@
+# Core
+python-dotenv>=1.0.0
+
+# Market data + news (Phase 1) — indicators are hand-rolled in pandas,
+# so no fragile pandas-ta / numpy-2 incompatibility.
+yfinance>=0.2.40
+pandas>=2.0
+numpy>=1.26
+feedparser>=6.0
+
+# LLM brain (Phase 2)
+openai>=1.40            # works for both Azure OpenAI and standard OpenAI
+
+# RAG (Phase 5)
+azure-search-documents>=11.5.0
+
+# UI (Phase 3)
+streamlit>=1.36
+
+# Tests (Phase 7)
+pytest>=8.0
+
+# NOTE: Microsoft Agent Framework SDK is added in Phase 4 to avoid early install churn.
