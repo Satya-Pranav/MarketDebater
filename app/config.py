@@ -47,6 +47,9 @@ DEFAULT_TICKERS = [
 DEBATE_ROUNDS = int(os.getenv("DEBATE_ROUNDS", "2"))
 MOCK_MODE = _flag("MOCK_MODE", "0")
 MAX_AGENT_TURNS = int(os.getenv("MAX_AGENT_TURNS", "12"))
+# Run the debate through Microsoft Agent Framework agents (needs `agent-framework`,
+# Python 3.10+). Falls back to the built-in orchestrator if unset or unavailable.
+USE_AGENT_FRAMEWORK = _flag("USE_AGENT_FRAMEWORK", "0")
 
 
 def llm_backend() -> str:

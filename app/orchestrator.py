@@ -24,11 +24,27 @@ def run_debate(ticker: str) -> dict[str, Any]:
     return _collect(stream_debate(ticker))
 
 
+def _use_maf() -> bool:
+    """True if the Microsoft Agent Framework path is enabled, installed, and usable."""
+    if not config.USE_AGENT_FRAMEWORK or config.MOCK_MODE or config.llm_backend() == "none":
+        return False
+    import importlib.util
+
+    return importlib.util.find_spec("agent_framework") is not None
+
+
 def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     """Yield debate events as they happen (for the Streamlit live transcript).
 
-    Event types: 'data', 'argument', 'verdict'.
+    Event types: 'data', 'argument', 'verdict'. Delegates to the Microsoft Agent
+    Framework path when enabled; otherwise runs the built-in debate below.
     """
+    if _use_maf():
+        from .orchestrator_maf import stream_debate_maf
+
+        yield from stream_debate_maf(ticker)
+        return
+
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
     yield {"type": "data", "snapshot": snapshot, "news": news}

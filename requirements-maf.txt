@@ -1,0 +1,6 @@
+# Optional: Microsoft Agent Framework debate path (Phase 4).
+# Heavy dependency, Python 3.10+. Kept separate so the default/cloud install
+# stays lean. Enable with USE_AGENT_FRAMEWORK=1 after installing:
+#   pip install -r requirements-maf.txt
+-r requirements.txt
+agent-framework>=1.7
