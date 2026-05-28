@@ -114,6 +114,27 @@ def render_verdict(container, verdict: dict, arguments: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Access gate (optional)                                                      #
+# --------------------------------------------------------------------------- #
+def check_password() -> bool:
+    """Gate the app when APP_PASSWORD is set (protects paid Azure calls on a public host).
+
+    No password configured (e.g. local dev) → no gate.
+    """
+    expected = os.getenv("APP_PASSWORD", "").strip()
+    if not expected or st.session_state.get("_authed"):
+        return True
+    st.warning("🔒 This hosted demo makes real (paid) Azure model calls. Enter the access password to run debates.")
+    pw = st.text_input("Access password", type="password")
+    if pw and pw == expected:
+        st.session_state["_authed"] = True
+        return True
+    if pw:
+        st.error("Incorrect password.")
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # App                                                                         #
 # --------------------------------------------------------------------------- #
 def main() -> None:
@@ -123,6 +144,9 @@ def main() -> None:
         "An AI investment committee: three rival analysts debate, a Chair grades them on "
         "**data grounding** and confidence, then issues a transparent verdict."
     )
+
+    if not check_password():
+        st.stop()
 
     with st.sidebar:
         st.header("Run a debate")
