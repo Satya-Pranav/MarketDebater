@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Iterator
 
-from . import config
-from .agents import PERSONAS, _build_user_prompt
+from . import config, search_client
+from .agents import PERSONA_QUERY, PERSONAS, _build_user_prompt
 from .chair import judge
 from .data_aggregator import aggregate
 from .llm import _parse_json
@@ -68,7 +68,8 @@ async def _run_rounds(snapshot: dict, news: list) -> tuple[list[dict], dict[str,
         )
         for persona in PERSONA_ORDER:
             others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
-            user = _build_user_prompt(snapshot, news, others)
+            evidence = search_client.retrieve(PERSONA_QUERY[persona], snapshot.get("ticker", ""))
+            user = _build_user_prompt(snapshot, news, others, evidence=evidence)
             resp = await agents[persona].run(user)
             text = getattr(resp, "text", None) or str(resp)
             arg = _shape(_parse_json(text), persona, rnd)
@@ -83,6 +84,8 @@ def stream_debate_maf(ticker: str) -> Iterator[dict[str, Any]]:
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
     yield {"type": "data", "snapshot": snapshot, "news": news}
+
+    search_client.index_news(ticker, news)  # no-op unless Azure AI Search is configured
 
     events, latest = asyncio.run(_run_rounds(snapshot, news))
     yield from events

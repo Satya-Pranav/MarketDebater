@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import config
+from . import config, search_client
 from .llm import chat_json
 
 _JSON_SHAPE = (
@@ -49,10 +49,19 @@ PERSONAS: dict[str, dict[str, str]] = {
 }
 
 
+# Persona-specific retrieval queries — each agent pulls the evidence that helps its case.
+PERSONA_QUERY: dict[str, str] = {
+    "bull": "growth expansion profit earnings beat order win deal positive catalyst upgrade",
+    "bear": "risk decline loss probe downgrade weak demand selloff debt litigation fall",
+    "neutral": "outlook guidance results analyst rating volatility valuation",
+}
+
+
 def _build_user_prompt(
     snapshot: dict[str, Any],
     news: list[dict[str, str]],
     opponents: dict[str, dict] | None,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> str:
     parts = [
         "MARKET SNAPSHOT (ground truth — cite these exact values):",
@@ -60,6 +69,14 @@ def _build_user_prompt(
         "\nRECENT NEWS HEADLINES:",
         "\n".join(f"- {n['title']} [{n.get('source','')}]" for n in news[:6]) or "(none)",
     ]
+    if evidence:
+        parts.append("\nRETRIEVED EVIDENCE (Azure AI Search — supports your angle):")
+        parts.append(
+            "\n".join(
+                f"- {e['title']}: {(e.get('content') or '')[:200]} [{e.get('source','')}]"
+                for e in evidence
+            )
+        )
     if opponents:
         parts.append("\nOPPONENTS' ARGUMENTS (rebut their weakest claims):")
         parts.append(json.dumps(opponents, indent=2, default=str))
@@ -75,7 +92,8 @@ def run_persona(
 ) -> dict[str, Any]:
     """Run one persona agent for one debate turn; returns its structured argument."""
     spec = PERSONAS[persona]
-    user = _build_user_prompt(snapshot, news, opponents)
+    evidence = search_client.retrieve(PERSONA_QUERY[persona], snapshot.get("ticker", ""))
+    user = _build_user_prompt(snapshot, news, opponents, evidence=evidence)
     arg = chat_json(
         spec["system"],
         user,

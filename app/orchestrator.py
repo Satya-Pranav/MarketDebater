@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Iterator
 
-from . import config
+from . import config, search_client
 from .agents import PERSONAS, run_persona
 from .chair import judge
 from .data_aggregator import aggregate
@@ -48,6 +48,8 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
     yield {"type": "data", "snapshot": snapshot, "news": news}
+
+    search_client.index_news(ticker, news)  # no-op unless Azure AI Search is configured
 
     rounds = max(1, config.DEBATE_ROUNDS)
     latest: dict[str, dict] = {}

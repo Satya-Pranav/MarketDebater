@@ -131,6 +131,20 @@ It produces the same event stream / verdict; the deterministic grounding verifie
 Chair are reused unchanged. Falls back to the built-in orchestrator automatically if the
 package is missing or in `MOCK_MODE`.
 
+### Evidence retrieval with Azure AI Search (optional RAG)
+When `AZURE_SEARCH_ENDPOINT` + `AZURE_SEARCH_API_KEY` are set, fetched news is indexed and
+each persona pulls its own supporting snippets via a `retrieve()` tool (bull → growth news,
+bear → risk news). Setup:
+
+1. Create an **Azure AI Search** service (the **Free** tier is enough for the demo).
+2. From the resource: copy the **URL** → `AZURE_SEARCH_ENDPOINT`, and an **admin key** →
+   `AZURE_SEARCH_API_KEY`. The index (`AZURE_SEARCH_INDEX`, default `marketdebater-news`)
+   is created automatically on first run.
+
+Retrieval uses **keyword (BM25) search**, so it needs *no embeddings* — handy when Azure
+OpenAI embedding quota isn't available. A vector field is a drop-in upgrade once it is.
+Unconfigured, retrieval is a safe no-op (agents still get the in-context headlines).
+
 ---
 
 ## Configuration
