@@ -53,7 +53,7 @@ yfinance (EOD OHLCV) ─┐                 │
 | Layer | Technology |
 |---|---|
 | LLM (personas + judge) | **Azure AI Foundry** — DeepSeek-V4-Flash via the OpenAI-compatible `/openai/v1` route (swap in any catalog model) |
-| Orchestration | Debate orchestrator (Microsoft Agent Framework group-chat path planned) |
+| Orchestration | Built-in debate orchestrator + optional **Microsoft Agent Framework** path (`USE_AGENT_FRAMEWORK=1`) |
 | RAG | **Azure AI Search** (optional evidence retrieval) |
 | UI | **Streamlit** |
 | Market data | `yfinance` (NSE EOD) + Google News RSS — no API keys required |
@@ -117,6 +117,19 @@ python -m app.data_aggregator RELIANCE.NS   # data smoke test
 python -m app.orchestrator RELIANCE.NS      # live debate + verdict in the terminal
 streamlit run app/streamlit_app.py          # the full UI at http://localhost:8501
 ```
+
+### Run the debate on Microsoft Agent Framework (optional)
+The personas can run as Microsoft Agent Framework `ChatAgent`s instead of the built-in
+orchestrator. Needs Python 3.10+ and the extra dependency:
+
+```bash
+pip install -r requirements-maf.txt
+USE_AGENT_FRAMEWORK=1 python -m app.orchestrator RELIANCE.NS
+```
+
+It produces the same event stream / verdict; the deterministic grounding verifier and
+Chair are reused unchanged. Falls back to the built-in orchestrator automatically if the
+package is missing or in `MOCK_MODE`.
 
 ---
 

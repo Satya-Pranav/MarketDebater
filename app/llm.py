@@ -87,7 +87,9 @@ def _parse_json(content: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 def _stance_from_system(system: str) -> str:
     s = system.upper()
-    for marker in ("PERMA-BULL", "BULL", "PERMA-BEAR", "BEAR", "RISK MANAGER", "NEUTRAL", "CHAIR"):
+    # CHAIR first: the Chair's prompt names the personas ("bull, bear, ...") and
+    # would otherwise be misclassified as one of them.
+    for marker in ("CHAIR", "PERMA-BULL", "BULL", "PERMA-BEAR", "BEAR", "RISK MANAGER", "NEUTRAL"):
         if marker in s:
             return {
                 "PERMA-BULL": "bull",
