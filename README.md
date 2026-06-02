@@ -67,14 +67,15 @@ yfinance (EOD OHLCV) ─┐                 │
 
 ```
 MarketDebater/
-├── app/
-│   ├── data_aggregator.py   # yfinance + hand-rolled technicals + RSS news
-│   ├── llm.py               # OpenAI-compatible backend (Azure Foundry / OpenAI / mock)
-│   ├── agents.py            # Bull / Bear / Risk personas → structured JSON
-│   ├── chair.py             # deterministic grounding verifier + LLM-as-judge
-│   ├── orchestrator.py      # multi-round debate; streams data/argument/verdict events
-│   ├── streamlit_app.py     # UI (live transcript + graded verdict card)
-│   └── config.py            # env/.env config
+├── backend/
+│   └── marketdebater/        # backend service surface wrapping the current swarm logic
+├── frontend/
+│   ├── manage.py             # Django entrypoint
+│   ├── dashboard/            # Django app for the web UI
+│   ├── marketdebater_frontend/ # Django project config
+│   ├── templates/            # HTML templates
+│   └── static/               # CSS and assets
+├── app/                      # existing swarm implementation (legacy-compatible)
 ├── .env.example             # configuration template (copy to .env)
 ├── requirements.txt
 ├── PLAN.md                  # full design doc + build sequencing
@@ -100,6 +101,16 @@ pip install -r requirements.txt
 cp .env.example .env
 #   then edit .env — see "Configuration" below
 ```
+
+### Run the Django frontend
+
+```bash
+source .venv/bin/activate
+python manage.py migrate
+python manage.py runserver
+```
+
+Open http://127.0.0.1:8000 and enter an NSE/BSE ticker. The page renders the debate verdict, the underlying snapshot, and the rejected-claim badges.
 
 ### Try it without any credentials (mock mode)
 The whole pipeline runs offline on deterministic stubs — great for development/demos:
