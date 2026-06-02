@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}MarketDebater Swarm{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">Stock Market Analysis</p>
+    <h1 class="hero-title">MarketDebater Swarm</h1>
+    <p class="lede">Get different perspectives from AI analysts on any NSE stock.</p>
+  </div>
+</section>
+
+<section class="panel form-panel">
+  <form method="post" action="{% url 'run-debate' %}" class="ticker-form">
+    {% csrf_token %}
+    {{ form.ticker.label_tag }}
+    <div class="form-row">
+      {{ form.ticker }}
+      <button type="submit">Run debate</button>
+    </div>
+  </form>
+  {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
+</section>
+
+{% if result %}
+  <section class="grid">
+    <article class="panel verdict-panel">
+      <div class="verdict-chip">Verdict</div>
+      <h2>{{ result.verdict.verdict }}</h2>
+      <p>{{ result.verdict.rationale }}</p>
+      <div class="disclaimer">{{ result.verdict.disclaimer }}</div>
+    </article>
+
+    <article class="panel snapshot-panel">
+      <h3>Snapshot</h3>
+      <ul class="metrics">
+        <li><span>Ticker</span><strong>{{ result.snapshot.ticker }}</strong></li>
+        <li><span>Price</span><strong>{{ result.snapshot.price }}</strong></li>
+        <li><span>RSI</span><strong>{{ result.snapshot.rsi_14 }}</strong></li>
+        <li><span>SMA 50</span><strong>{{ result.snapshot.sma_50 }}</strong></li>
+        <li><span>SMA 200</span><strong>{{ result.snapshot.sma_200 }}</strong></li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h3>Rejected claim badges</h3>
+    <div class="badges">
+      {% for item in rejected_claims %}
+        <div class="badge-group">
+          <h4>{{ item.label }}</h4>
+          <div class="badge-list">
+            {% for metric in item.metrics %}
+              <span class="badge">{{ metric }}</span>
+            {% empty %}
+              <span class="muted">No rejected claims</span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Debate transcript</h3>
+    <div class="transcript">
+      {% for turn in result.transcript %}
+        <article class="turn">
+          <header>
+            <strong>{{ turn.argument.persona_name }}</strong>
+            <span>Round {{ turn.round }}</span>
+            <span>{{ turn.argument.stance }}</span>
+            <span>Confidence {{ turn.argument.confidence }}</span>
+          </header>
+          <ul>
+            {% for point in turn.argument.points %}
+              <li>
+                <span>{{ point.claim }}</span>
+                {% if point.cited_metric %}
+                  <small>{{ point.cited_metric }}</small>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+{% endblock %}

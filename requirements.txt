@@ -17,6 +17,9 @@ azure-search-documents>=11.5.0
 # UI (Phase 3)
 streamlit>=1.36
 
+# Django frontend
+Django>=5.0
+
 # Tests (Phase 7)
 pytest>=8.0
 
