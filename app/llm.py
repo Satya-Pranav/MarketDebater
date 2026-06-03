@@ -1,4 +1,4 @@
-"""LLM backend wrapper — Phase 2.
+"""LLM backend wrapper.
 
 One entry point, ``chat_json``, that returns parsed JSON from the model. It
 auto-selects the backend from config:
@@ -6,8 +6,11 @@ auto-selects the backend from config:
   - 'openai' -> standard OpenAI (local-dev fallback)
   - mock     -> deterministic, offline, stance-aware stub (MOCK_MODE or no keys)
 
-The mock lets the entire debate pipeline run and be tested with zero credentials,
-then lights up for real the moment Azure/OpenAI keys land in .env.
+DeepSeek-R1 (reasoning model) is handled by passing ``is_reasoning_model=True``:
+- response_format is disabled (R1 doesn't support json_object on Azure Foundry)
+- max_tokens is bumped (R1 thinking eats tokens)
+- One retry with a "JSON only, no thinking" prefix if the first reply is all
+  ``<think>...</think>`` and no parseable JSON.
 """
 from __future__ import annotations
 
@@ -18,6 +21,10 @@ from typing import Any
 from . import config
 
 
+class _NoJsonError(ValueError):
+    """Model returned reasoning but no usable JSON. Worth one retry."""
+
+
 def chat_json(
     system: str,
     user: str,
@@ -25,11 +32,17 @@ def chat_json(
     deployment: str | None = None,
     temperature: float = 0.4,
     context: dict[str, Any] | None = None,
+    is_reasoning_model: bool = False,
 ) -> dict[str, Any]:
     """Run a chat completion constrained to a JSON object and parse it.
 
     ``context`` (e.g. the market snapshot) is only used by the mock backend to
     produce grounded citations; real backends ignore it.
+
+    Set ``is_reasoning_model=True`` for DeepSeek-R1 / o1-style models so we:
+      - skip response_format (R1 rejects json_object on Azure Foundry),
+      - allocate more tokens for the inline ``<think>...</think>`` block,
+      - retry once with a stricter "JSON only" prefix on empty-after-think output.
     """
     backend = config.llm_backend()
     if config.MOCK_MODE or backend == "none":
@@ -37,8 +50,14 @@ def chat_json(
 
     from openai import OpenAI
 
+    system_payload = system + (
+        "\nThink as needed, but your FINAL output MUST be a single valid JSON object, "
+        "no markdown, no commentary, no trailing prose."
+        if is_reasoning_model
+        else "\nRespond with a single valid JSON object — no markdown, no commentary."
+    )
     messages = [
-        {"role": "system", "content": system + "\nRespond with a single valid JSON object — no markdown, no commentary."},
+        {"role": "system", "content": system_payload},
         {"role": "user", "content": user},
     ]
 
@@ -56,30 +75,63 @@ def chat_json(
         model = deployment or "gpt-4o"
 
     base_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    if is_reasoning_model:
+        base_kwargs["max_tokens"] = 8000  # R1's <think> easily fills 2-4k tokens
     try:
-        resp = client.chat.completions.create(
-            **base_kwargs,
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
+        if is_reasoning_model:
+            # R1 rejects response_format; lean on the prompt + robust parsing.
+            resp = client.chat.completions.create(**base_kwargs, temperature=temperature)
+        else:
+            resp = client.chat.completions.create(
+                **base_kwargs,
+                temperature=temperature,
+                response_format={"type": "json_object"},
+            )
     except Exception:
         # Some Foundry catalog models reject response_format / custom temperature;
         # fall back to a bare call and lean on the prompt + robust parsing.
         resp = client.chat.completions.create(**base_kwargs)
-    return _parse_json(resp.choices[0].message.content or "{}")
+
+    raw = resp.choices[0].message.content or "{}"
+    try:
+        return _parse_json(raw)
+    except _NoJsonError:
+        if not is_reasoning_model:
+            raise
+        # R1 sometimes truncates after </think>. Retry with a stricter prefix.
+        retry_messages = [
+            {
+                "role": "system",
+                "content": system + "\nReturn ONLY a JSON object. No <think> block, no prose.",
+            },
+            {"role": "user", "content": user},
+        ]
+        resp = client.chat.completions.create(
+            model=model, messages=retry_messages, max_tokens=4000, temperature=temperature
+        )
+        return _parse_json(resp.choices[0].message.content or "{}")
 
 
 def _parse_json(content: str) -> dict[str, Any]:
     """Parse model output into a dict, tolerating <think> blocks and code fences."""
-    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-    content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
+    # Strip complete <think>...</think> first.
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    # An unterminated <think> means the model spent everything thinking — peel it.
+    if cleaned.startswith("<think>") and "</think>" not in cleaned:
+        cleaned = cleaned[len("<think>"):]
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+    if not cleaned:
+        raise _NoJsonError("empty content after stripping <think>/fences")
     try:
-        return json.loads(content)
+        return json.loads(cleaned)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
         if match:
-            return json.loads(match.group(0))
-        raise
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        raise _NoJsonError(f"no JSON object found in: {cleaned[:200]!r}")
 
 
 # --------------------------------------------------------------------------- #

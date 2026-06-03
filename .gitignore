@@ -12,6 +12,10 @@ venv/
 .streamlit/secrets.toml
 .pytest_cache/
 
+# Local scan outputs (use Azure Blob in prod)
+out/
+tmp/
+
 # OS
 .DS_Store
 

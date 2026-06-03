@@ -1,212 +1,76 @@
-"""Data Aggregator (Retriever) — Phase 1.
+"""Data Aggregator — fans out to three I/O-bound clients in parallel.
 
-Pulls NSE end-of-day OHLCV via yfinance, computes technical indicators in pure
-pandas (no pandas-ta, to avoid numpy-2 incompatibilities), and fetches recent
-news headlines from free RSS feeds. The structured snapshot returned here is the
-**ground-truth** that the Chair later fact-checks agent claims against.
+Three co-equal inputs feed the debate:
+  - **Prices** (yfinance, technicals computed locally) — see app.prices_client
+  - **News**   (Grok web search, RSS fallback)        — see app.news_client
+  - **Filings**(sec-api.io 10-K/10-Q/8-K + XBRL)      — see app.filings_client
 
-CLI:  python -m app.data_aggregator RELIANCE.NS
+The public ``aggregate(ticker) -> {snapshot, news, filings, filings_metrics}``
+shape is what every downstream layer (agents, chair, orchestrator, scan, search)
+depends on. Filings-derived metrics are also folded into the snapshot so the
+existing flat-key grounding verifier in chair.py works without changes.
+
+CLI:  python -m app.data_aggregator AAPL
 """
 from __future__ import annotations
 
 import sys
-import urllib.parse
-from dataclasses import dataclass, field, asdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-import feedparser
-import numpy as np
-import pandas as pd
-import yfinance as yf
-
-
-# --------------------------------------------------------------------------- #
-# Technical indicators (pure pandas)                                          #
-# --------------------------------------------------------------------------- #
-def _sma(s: pd.Series, n: int) -> float:
-    return float(s.rolling(n).mean().iloc[-1]) if len(s) >= n else float("nan")
-
-
-def _ema(s: pd.Series, n: int) -> pd.Series:
-    return s.ewm(span=n, adjust=False).mean()
-
-
-def _rsi(close: pd.Series, n: int = 14) -> float:
-    """Wilder's RSI."""
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / n, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / n, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
-
-
-def _macd(close: pd.Series) -> dict[str, float]:
-    macd_line = _ema(close, 12) - _ema(close, 26)
-    signal = _ema(macd_line, 9)
-    hist = macd_line - signal
-    return {
-        "macd": round(float(macd_line.iloc[-1]), 4),
-        "signal": round(float(signal.iloc[-1]), 4),
-        "histogram": round(float(hist.iloc[-1]), 4),
-    }
-
-
-def _bollinger(close: pd.Series, n: int = 20, k: float = 2.0) -> dict[str, float]:
-    if len(close) < n:
-        return {"upper": float("nan"), "middle": float("nan"), "lower": float("nan")}
-    mid = close.rolling(n).mean().iloc[-1]
-    std = close.rolling(n).std().iloc[-1]
-    return {
-        "upper": round(float(mid + k * std), 2),
-        "middle": round(float(mid), 2),
-        "lower": round(float(mid - k * std), 2),
-    }
-
-
-# --------------------------------------------------------------------------- #
-# Snapshot                                                                    #
-# --------------------------------------------------------------------------- #
-@dataclass
-class MarketSnapshot:
-    ticker: str
-    company: str
-    as_of: str
-    currency: str
-    price: float
-    prev_close: float
-    change_pct: float
-    day_high: float
-    day_low: float
-    week52_high: float
-    week52_low: float
-    volume: int
-    avg_volume_20d: float
-    volume_vs_avg_pct: float
-    rsi_14: float
-    macd: dict[str, float]
-    sma_20: float
-    sma_50: float
-    sma_200: float
-    bollinger: dict[str, float]
-    pe_ratio: float | None = None
-    market_cap: float | None = None
-    notes: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-def get_market_snapshot(ticker: str) -> MarketSnapshot:
-    """Fetch EOD data + technicals for an NSE ticker (e.g. 'RELIANCE.NS')."""
-    tk = yf.Ticker(ticker)
-    hist = tk.history(period="1y", interval="1d")
-    if hist.empty:
-        raise ValueError(
-            f"No price data for '{ticker}'. Check the symbol (NSE needs a .NS suffix)."
-        )
-
-    close = hist["Close"].dropna()
-    info: dict[str, Any] = {}
-    try:
-        info = tk.info or {}
-    except Exception:  # yfinance .info is flaky; degrade gracefully
-        info = {}
-
-    price = float(close.iloc[-1])
-    prev_close = float(close.iloc[-2]) if len(close) > 1 else price
-    avg_vol_20 = float(hist["Volume"].tail(20).mean())
-    last_vol = int(hist["Volume"].iloc[-1])
-
-    return MarketSnapshot(
-        ticker=ticker,
-        company=info.get("longName") or info.get("shortName") or ticker.replace(".NS", ""),
-        as_of=str(hist.index[-1].date()),
-        currency=info.get("currency", "INR"),
-        price=round(price, 2),
-        prev_close=round(prev_close, 2),
-        change_pct=round((price - prev_close) / prev_close * 100, 2) if prev_close else 0.0,
-        day_high=round(float(hist["High"].iloc[-1]), 2),
-        day_low=round(float(hist["Low"].iloc[-1]), 2),
-        week52_high=round(float(close.tail(252).max()), 2),
-        week52_low=round(float(close.tail(252).min()), 2),
-        volume=last_vol,
-        avg_volume_20d=round(avg_vol_20, 0),
-        volume_vs_avg_pct=round((last_vol - avg_vol_20) / avg_vol_20 * 100, 1) if avg_vol_20 else 0.0,
-        rsi_14=round(_rsi(close), 2),
-        macd=_macd(close),
-        sma_20=round(_sma(close, 20), 2),
-        sma_50=round(_sma(close, 50), 2),
-        sma_200=round(_sma(close, 200), 2),
-        bollinger=_bollinger(close),
-        pe_ratio=info.get("trailingPE"),
-        market_cap=info.get("marketCap"),
-    )
-
-
-# --------------------------------------------------------------------------- #
-# News (free RSS — no API key required)                                       #
-# --------------------------------------------------------------------------- #
-def get_news(query: str, limit: int = 8) -> list[dict[str, str]]:
-    """Recent headlines for a company/ticker via Google News RSS (India edition)."""
-    q = urllib.parse.quote_plus(f"{query} stock NSE")
-    url = (
-        f"https://news.google.com/rss/search?q={q}"
-        "&hl=en-IN&gl=IN&ceid=IN:en"
-    )
-    feed = feedparser.parse(url)
-    items: list[dict[str, str]] = []
-    for entry in feed.entries[:limit]:
-        items.append(
-            {
-                "title": entry.get("title", ""),
-                "source": entry.get("source", {}).get("title", "Google News")
-                if isinstance(entry.get("source"), dict)
-                else "Google News",
-                "published": entry.get("published", ""),
-                "url": entry.get("link", ""),
-                "summary": entry.get("summary", "")[:400],
-            }
-        )
-    return items
+from . import filings_client, news_client, prices_client, universe
 
 
 def aggregate(ticker: str) -> dict[str, Any]:
-    """One-shot: snapshot + news, ready to hand to the debate tier."""
-    snap = get_market_snapshot(ticker)
-    news = get_news(snap.company or ticker)
+    """Fetch prices, news, and filings in parallel for one ticker."""
+    cik = ""
+    try:
+        cik = universe.cik_for(ticker)
+    except Exception:
+        # universe sheet may be unavailable in dev; CIK is optional anyway.
+        cik = ""
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_snap = pool.submit(prices_client.get_market_snapshot, ticker)
+        f_news = pool.submit(news_client.get_news, ticker)
+        f_bundle = pool.submit(filings_client.get_filings_bundle, ticker, cik)
+        snap = f_snap.result().to_dict()
+        news = f_news.result() or []
+        bundle = f_bundle.result() or {"filings": [], "metrics": {}}
+
+    metrics = bundle.get("metrics", {}) or {}
+    # Fold filings-derived metrics into the snapshot so chair.verify_grounding()
+    # can resolve `revenue=...`, `eps_diluted=...` etc. without code changes.
+    for k, v in metrics.items():
+        snap.setdefault(k, v)
+
     return {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "snapshot": snap.to_dict(),
+        "snapshot": snap,
         "news": news,
+        "filings": bundle.get("filings", []) or [],
+        "filings_metrics": metrics,
     }
 
 
-# --------------------------------------------------------------------------- #
-# CLI / verification gate                                                     #
-# --------------------------------------------------------------------------- #
 def _main() -> int:
-    ticker = sys.argv[1] if len(sys.argv) > 1 else "RELIANCE.NS"
+    ticker = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
     data = aggregate(ticker)
     s = data["snapshot"]
     print(f"\n=== {s['company']} ({s['ticker']}) — as of {s['as_of']} ===")
     print(f"  Price {s['currency']} {s['price']}  ({s['change_pct']:+}% vs prev close)")
-    print(f"  52w range: {s['week52_low']} – {s['week52_high']}")
-    print(f"  RSI(14): {s['rsi_14']}   MACD: {s['macd']}")
-    print(f"  SMA 20/50/200: {s['sma_20']} / {s['sma_50']} / {s['sma_200']}")
-    print(f"  Bollinger: {s['bollinger']}")
-    print(f"  Volume vs 20d avg: {s['volume_vs_avg_pct']:+}%   P/E: {s['pe_ratio']}")
+    print(f"  RSI(14): {s['rsi_14']}   SMA 20/50/200: {s['sma_20']} / {s['sma_50']} / {s['sma_200']}")
     print(f"\n  News ({len(data['news'])} items):")
     for n in data["news"][:5]:
-        print(f"   • {n['title']}  [{n['source']}]")
-
-    # Self-check (Phase 1 verification gate)
+        print(f"   - {n['title']}  [{n['source']}]")
+    print(f"\n  Filings ({len(data['filings'])} items):")
+    for f in data["filings"][:5]:
+        print(f"   - {f['form']:6} {f['filed_at']}  {(f['sections'] or '')[:80]!r}")
+    print(f"\n  Filings metrics: {data['filings_metrics']}")
     assert 0 <= s["rsi_14"] <= 100, "RSI out of range"
     assert s["price"] > 0, "Non-positive price"
-    print("\n✅ Phase 1 gate passed: snapshot valid, RSI in range, news fetched.")
+    print("\nOK: snapshot valid, RSI in range, fetched ok.")
     return 0
 
 
