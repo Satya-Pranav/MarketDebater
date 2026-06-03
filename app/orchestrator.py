@@ -1,10 +1,9 @@
-"""Debate orchestrator — Phase 2.
+"""Debate orchestrator.
 
-Runs the multi-round debate (Phase 4 will swap the internals for the Microsoft
-Agent Framework group chat; the public API stays the same) and hands the final
-arguments to the Chair.
+Runs the multi-round debate (3 rounds by default: case -> rebuttal -> closing)
+and hands the final arguments to the Chair. Streams events for the UI.
 
-CLI:  python -m app.orchestrator RELIANCE.NS
+CLI:  python -m app.orchestrator AAPL
 """
 from __future__ import annotations
 
@@ -47,9 +46,18 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
 
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
-    yield {"type": "data", "snapshot": snapshot, "news": news}
+    filings = data.get("filings", [])
+    yield {
+        "type": "data",
+        "snapshot": snapshot,
+        "news": news,
+        "filings": filings,
+        "filings_metrics": data.get("filings_metrics", {}),
+    }
 
-    search_client.index_news(ticker, news)  # no-op unless Azure AI Search is configured
+    # Index both news AND filings for RAG retrieval. Both are no-ops when AI Search isn't configured.
+    search_client.index_news(ticker, news)
+    search_client.index_filings(ticker, filings)
 
     rounds = max(1, config.DEBATE_ROUNDS)
     latest: dict[str, dict] = {}
@@ -62,7 +70,15 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
         )
         for persona in PERSONA_ORDER:
             others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
-            arg = run_persona(persona, snapshot, news, opponents=others)
+            arg = run_persona(
+                persona,
+                snapshot,
+                news,
+                opponents=others,
+                filings=filings,
+                round_num=rnd,
+                final_round=(rnd == rounds and rounds > 1),
+            )
             arg["round"] = rnd
             latest[persona] = arg
             yield {"type": "argument", "round": rnd, "persona": persona, "argument": arg}
@@ -76,6 +92,8 @@ def _collect(events: Iterator[dict[str, Any]]) -> dict[str, Any]:
     for ev in events:
         if ev["type"] == "data":
             result["snapshot"], result["news"] = ev["snapshot"], ev["news"]
+            result["filings"] = ev.get("filings", [])
+            result["filings_metrics"] = ev.get("filings_metrics", {})
         elif ev["type"] == "argument":
             result["transcript"].append(ev)
         elif ev["type"] == "verdict":
@@ -84,7 +102,7 @@ def _collect(events: Iterator[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _main() -> int:
-    ticker = sys.argv[1] if len(sys.argv) > 1 else "RELIANCE.NS"
+    ticker = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
     backend = config.llm_backend()
     mode = "MOCK" if (config.MOCK_MODE or backend == "none") else backend.upper()
     print(f"\n[backend: {mode}]  Running debate for {ticker} ...\n")
@@ -104,11 +122,12 @@ def _main() -> int:
     print(f"Grounding: " + ", ".join(
         f"{p}={g['grounding']}" for p, g in v["grounding_scores"].items()))
     print(f"Weights:   {v['weights']}")
+    print(f"Net bull score: {v.get('net_bull_score')}")
     print(f"\n{v['disclaimer']}")
     print("=" * 60)
 
     assert v["verdict"] in ["Strong Buy", "Accumulate", "Hold", "Reduce"], "Invalid verdict"
-    print("\n✅ Phase 2 gate passed: debate ran, verdict in enum, grounding computed.")
+    print("\nOK: debate ran, verdict in enum, grounding computed, net_bull_score present.")
     return 0
 
 

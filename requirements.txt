@@ -1,23 +1,29 @@
 # Core
 python-dotenv>=1.0.0
 
-# Market data + news (Phase 1) — indicators are hand-rolled in pandas,
-# so no fragile pandas-ta / numpy-2 incompatibility.
+# Market data — yfinance for US EOD OHLCV; technicals hand-rolled in pandas to
+# avoid the pandas-ta / numpy-2 incompatibility.
 yfinance>=0.2.40
 pandas>=2.0
 numpy>=1.26
+
+# News fallback — used only when GROK_API_KEY is unset (Grok web search is primary).
 feedparser>=6.0
 
-# LLM brain (Phase 2)
-openai>=1.40            # works for both Azure OpenAI and standard OpenAI
+# LLM brain — works for Azure OpenAI / Foundry, standard OpenAI, AND xAI Grok.
+openai>=1.40
 
-# RAG (Phase 5)
+# RAG (Azure AI Search)
 azure-search-documents>=11.5.0
 
-# UI (Phase 3)
+# Verdict persistence (Azure Blob Storage)
+azure-storage-blob>=12.20.0
+
+# UI
 streamlit>=1.36
 
-# Tests (Phase 7)
+# Tests
 pytest>=8.0
 
-# NOTE: Microsoft Agent Framework SDK is added in Phase 4 to avoid early install churn.
+# NOTE: Microsoft Agent Framework SDK lives in requirements-maf.txt to keep the
+# base install small and Python-3.9-compatible.

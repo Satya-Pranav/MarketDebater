@@ -1,0 +1,36 @@
+# MarketDebater watchlist — 25 US tickers, sector-diversified.
+# One ticker per line. Lines starting with # are ignored, blanks too.
+# Edit freely; app.universe.load_tickers() reads this on every scan.
+#
+# Tech / Mag 7
+AAPL
+MSFT
+GOOGL
+AMZN
+NVDA
+META
+TSLA
+# Finance
+JPM
+V
+MA
+BAC
+GS
+# Healthcare
+UNH
+JNJ
+LLY
+PFE
+# Consumer staples + discretionary
+WMT
+COST
+HD
+KO
+PG
+# Energy
+XOM
+CVX
+# Industrial
+CAT
+# Communications / media
+NFLX

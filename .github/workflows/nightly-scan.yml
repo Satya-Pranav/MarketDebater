@@ -1,0 +1,68 @@
+name: MarketDebater on-demand scan
+
+# Manual trigger only — small curated watchlist (~25 tickers) so a single job
+# finishes well inside the GitHub Actions 6h limit, even with DeepSeek-R1
+# personas. If you flip to UNIVERSE_FROM_SHEET=1 (~4.6k tickers), re-introduce
+# the cron + matrix shard pattern documented in the README.
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Override scan date (YYYY-MM-DD)"
+        required: false
+        default: ""
+      tickers:
+        description: "Comma-separated ticker subset (overrides watchlist)"
+        required: false
+        default: ""
+      use_sheet:
+        description: "Set 'true' to scan the full Google Sheet universe instead of the watchlist"
+        required: false
+        default: "false"
+
+concurrency:
+  group: marketdebater-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scan
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_CHAT_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT }}
+          AZURE_OPENAI_PERSONA_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_PERSONA_DEPLOYMENT }}
+          AZURE_OPENAI_PERSONA_R1_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_PERSONA_R1_DEPLOYMENT }}
+          GROK_MODEL: ${{ secrets.GROK_MODEL }}
+          SEC_API_KEY: ${{ secrets.SEC_API_KEY }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          BLOB_CONTAINER: ${{ secrets.BLOB_CONTAINER }}
+          AZURE_SEARCH_ENDPOINT: ${{ secrets.AZURE_SEARCH_ENDPOINT }}
+          AZURE_SEARCH_API_KEY: ${{ secrets.AZURE_SEARCH_API_KEY }}
+          UNIVERSE_SHEET_ID: ${{ secrets.UNIVERSE_SHEET_ID }}
+          UNIVERSE_FROM_SHEET: ${{ github.event.inputs.use_sheet == 'true' && '1' || '0' }}
+          DEBATE_ROUNDS: "3"
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.date }}"
+          fi
+          if [ -n "${{ github.event.inputs.tickers }}" ]; then
+            ARGS="$ARGS --tickers ${{ github.event.inputs.tickers }}"
+          fi
+          python -m app.scan $ARGS
