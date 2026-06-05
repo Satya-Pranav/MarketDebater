@@ -111,6 +111,24 @@
           {% endfor %}
         </div>
       </div>
+      
+      <div class="updates-card">
+        <h4>Latest Updates</h4>
+        <div class="updates-body">
+          {% if result.news %}
+            <ul class="updates-list">
+              {% for n in result.news %}
+                <li class="update-item">
+                  <div class="update-time">{{ n.published_at|default:n.time|default:"" }}</div>
+                  <div class="update-text">{{ n.title|default:n.headline|default:n.summary|default:n.text }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="updates-empty">No recent updates — try refreshing for hourly updates.</div>
+          {% endif %}
+        </div>
+      </div>
     </div>
 
     <div class="key-points-section">
