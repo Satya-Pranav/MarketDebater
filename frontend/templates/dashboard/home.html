@@ -93,7 +93,7 @@
             {% with grading=result.verdict.grounding_scores|get_item:persona %}
               {% with weight=result.verdict.weights|get_item:persona %}
                 {% with confidence=result.arguments|get_item:persona|get_item:"confidence" %}
-                  <div class="persona-playcard" data-persona="{{ persona }}" data-confidence="{{ confidence|default:0 }}" data-grounding="{{ grading.grounding|default:0 }}" data-weight="{{ weight|default:0 }}" onclick="showStatsModal('{{ persona }}', {{ confidence }}, {{ grading.grounding }}, {{ weight }})">
+                  <div class="persona-playcard" data-persona="{{ persona }}" data-confidence="{{ confidence|default:0 }}" data-grounding="{{ grading.grounding|default:0 }}" data-weight="{{ weight|default:0 }}" onclick="showStatsModal('{{ persona }}', {{ confidence|default:0 }}, {{ grading.grounding|default:0 }}, {{ weight|default:0 }})">
                     <div class="playcard-header">
                       <div class="playcard-name">{{ label }}</div>
                     </div>
@@ -119,8 +119,8 @@
             <ul class="updates-list">
               {% for n in result.news %}
                 <li class="update-item">
-                  <div class="update-time">{{ n.published|default:n.published_at|default:n.time|default:"" }}</div>
-                  <div class="update-text">{{ n.title|default:n.headline|default:n.summary|default:n.text }}</div>
+                  <div class="update-time">{{ n|get_item:"published"|default:n|get_item:"published_at"|default:n|get_item:"time"|default:"" }}</div>
+                  <div class="update-text">{{ n|get_item:"title"|default:n|get_item:"headline"|default:n|get_item:"summary"|default:n|get_item:"text"|default:"" }}</div>
                 </li>
               {% endfor %}
             </ul>
@@ -161,22 +161,24 @@
             <div class="key-highlights">
               {% for turn in result.transcript %}
                 {% if turn.argument.persona == persona %}
-                  {% if turn.argument.stance == 'positive' or 'positive' in turn.argument.points|lower %}
-                    <div class="highlight-item positive">
-                      <span class="highlight-icon">✓</span>
-                      <div class="highlight-text"><strong>Positive:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
-                    </div>
-                  {% elif turn.argument.stance == 'negative' or 'negative' in turn.argument.points|lower %}
-                    <div class="highlight-item negative">
-                      <span class="highlight-icon">✗</span>
-                      <div class="highlight-text"><strong>Negative:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
-                    </div>
-                  {% else %}
-                    <div class="highlight-item neutral">
-                      <span class="highlight-icon">○</span>
-                      <div class="highlight-text"><strong>Note:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
-                    </div>
-                  {% endif %}
+                  {% with text=turn.argument.summary|default:turn.argument.points|stringformat:"s"|lower %}
+                    {% if turn.argument.stance == 'positive' or 'positive' in text %}
+                      <div class="highlight-item positive">
+                        <span class="highlight-icon">✓</span>
+                        <div class="highlight-text"><strong>Positive:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                      </div>
+                    {% elif turn.argument.stance == 'negative' or 'negative' in text %}
+                      <div class="highlight-item negative">
+                        <span class="highlight-icon">✗</span>
+                        <div class="highlight-text"><strong>Negative:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                      </div>
+                    {% else %}
+                      <div class="highlight-item neutral">
+                        <span class="highlight-icon">○</span>
+                        <div class="highlight-text"><strong>Note:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                      </div>
+                    {% endif %}
+                  {% endwith %}
                 {% endif %}
               {% endfor %}
             </div>

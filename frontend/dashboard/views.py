@@ -7,8 +7,8 @@ import time
 
 from django.shortcuts import render
 
-from backend.marketdebater import config
-from backend.marketdebater.orchestrator import run_debate
+from app import config
+from app.orchestrator import run_debate
 
 from .forms import TickerForm
 
