@@ -1,91 +1,242 @@
 {% extends "base.html" %}
+{% load custom_filters %}
 {% block title %}MarketDebater Swarm{% endblock %}
 {% block content %}
-<section class="hero">
-  <div class="hero-copy">
-    <p class="eyebrow">Stock Market Analysis</p>
-    <h1 class="hero-title">MarketDebater Swarm</h1>
-    <p class="lede">Get different perspectives from AI analysts on any NSE stock.</p>
-  </div>
-</section>
 
-<section class="panel form-panel">
-  <form method="post" action="{% url 'run-debate' %}" class="ticker-form">
-    {% csrf_token %}
-    {{ form.ticker.label_tag }}
-    <div class="form-row">
-      {{ form.ticker }}
-      <button type="submit">Run debate</button>
+{# Landing: search form #}
+{% if not submitted %}
+  <div class="landing-container">
+    <div class="landing-content">
+      <div class="landing-header">
+        <div class="logo-badge">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 4 L44 40 L4 40 Z" stroke="#38bdf8" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
+        </div>
+        <h1 class="landing-title">MarketDebater Swarm</h1>
+        <p class="landing-subtitle">AI-powered debate on any NSE stock</p>
+      </div>
+
+      <form method="post" action="{% url 'run-debate' %}" class="search-form">
+        {% csrf_token %}
+        <div class="search-box">
+          {{ form.ticker }}
+          <button type="submit" class="search-button">Debate</button>
+        </div>
+        {% if error %}
+          <div class="search-error">{{ error }}</div>
+        {% endif %}
+      </form>
+
+      <div class="suggested-section">
+        <p class="suggested-label">Try these NSE stocks:</p>
+        <div class="ticker-chips">
+          {% for ticker in suggested_tickers %}
+            <button type="button" class="ticker-chip" onclick="selectTicker('{{ ticker }}')">{{ ticker }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
     </div>
-  </form>
-  {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
-  {% endif %}
-</section>
+  </div>
+{% endif %}
 
+{# Results: show only when result exists #}
 {% if result %}
-  <section class="grid">
-    <article class="panel verdict-panel">
-      <div class="verdict-chip">Verdict</div>
-      <h2>{{ result.verdict.verdict }}</h2>
-      <p>{{ result.verdict.rationale }}</p>
-      <div class="disclaimer">{{ result.verdict.disclaimer }}</div>
-    </article>
+  <div class="results-container">
+    <div class="results-header">
+      <button class="back-button" onclick="goHome()">New debate</button>
+    </div>
 
-    <article class="panel snapshot-panel">
-      <h3>Snapshot</h3>
-      <ul class="metrics">
-        <li><span>Ticker</span><strong>{{ result.snapshot.ticker }}</strong></li>
-        <li><span>Price</span><strong>{{ result.snapshot.price }}</strong></li>
-        <li><span>RSI</span><strong>{{ result.snapshot.rsi_14 }}</strong></li>
-        <li><span>SMA 50</span><strong>{{ result.snapshot.sma_50 }}</strong></li>
-        <li><span>SMA 200</span><strong>{{ result.snapshot.sma_200 }}</strong></li>
-      </ul>
-    </article>
-  </section>
+    <div class="panel snapshot-card">
+      <div class="snapshot-header">
+        <div class="snapshot-title">
+          <h2>{{ result.snapshot.company }}</h2>
+          <span class="ticker-badge">{{ result.snapshot.ticker }}</span>
+        </div>
+        <div class="snapshot-price">
+          <div class="price-value">₹{{ result.snapshot.price }}</div>
+          <div class="price-change {% if result.snapshot.change_pct >= 0 %}positive{% else %}negative{% endif %}">
+            {{ result.snapshot.change_pct|floatformat:2 }}%
+          </div>
+        </div>
+      </div>
+    </div>
 
-  <section class="panel">
-    <h3>Rejected claim badges</h3>
-    <div class="badges">
-      {% for item in rejected_claims %}
-        <div class="badge-group">
-          <h4>{{ item.label }}</h4>
-          <div class="badge-list">
-            {% for metric in item.metrics %}
-              <span class="badge">{{ metric }}</span>
-            {% empty %}
-              <span class="muted">No rejected claims</span>
-            {% endfor %}
+    <div class="panel verdict-card">
+      <div class="verdict-label">Chair's Verdict</div>
+      <h1 class="verdict-value">{{ result.verdict.verdict }}</h1>
+      <p class="verdict-rationale">{{ result.verdict.rationale }}</p>
+    </div>
+
+    <div class="debate-filters">
+      <button class="filter-btn active" data-filter="all" onclick="switchDebateFilter('all')">Overall Analysis</button>
+      <button class="filter-btn" data-filter="bull" onclick="switchDebateFilter('bull')">PermaBull</button>
+      <button class="filter-btn" data-filter="bear" onclick="switchDebateFilter('bear')">PermaBear</button>
+      <button class="filter-btn" data-filter="neutral" onclick="switchDebateFilter('neutral')">RiskManager</button>
+    </div>
+
+    <div class="grading-section">
+      <h3 class="section-title">Analyst Scores</h3>
+
+      <div class="grading-overview">
+        <div class="pie-charts-section">
+          <div class="pie-chart-container">
+            <h4>Weight Distribution</h4>
+            <svg viewBox="0 0 180 180" class="pie-chart-small">
+              <circle cx="90" cy="90" r="70" fill="none" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>
+              <circle cx="90" cy="90" r="70" fill="none" stroke="#10b981" stroke-width="14" opacity="0.8"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="personas-row">
+          {% for persona, label in persona_labels.items %}
+            {% with grading=result.verdict.grounding_scores|get_item:persona %}
+              {% with weight=result.verdict.weights|get_item:persona %}
+                {% with confidence=result.arguments|get_item:persona|get_item:"confidence" %}
+                  <div class="persona-playcard" data-persona="{{ persona }}" data-confidence="{{ confidence|default:0 }}" data-grounding="{{ grading.grounding|default:0 }}" data-weight="{{ weight|default:0 }}" onclick="showStatsModal('{{ persona }}', {{ confidence }}, {{ grading.grounding }}, {{ weight }})">
+                    <div class="playcard-header">
+                      <div class="playcard-name">{{ label }}</div>
+                    </div>
+                    <div class="playcard-front">
+                      <div class="weight-badge" style="background: conic-gradient(#10b981 {{ weight|mul:100|floatformat:0 }}%, rgba(148,163,184,0.08) 0%);"></div>
+                      <div class="score-block">
+                        <span class="score-label">Confidence</span>
+                        <span class="score-value">{{ confidence|floatformat:1 }}</span>
+                      </div>
+                    </div>
+                  </div>
+                {% endwith %}
+              {% endwith %}
+            {% endwith %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="key-points-section">
+      <div id="filter-all" class="filter-content active">
+        <h3 class="section-title">Key Arguments Overview</h3>
+        <div class="key-points-table">
+          {% for persona, label in persona_labels.items %}
+            <div class="persona-points-row">
+              <div class="persona-column">
+                <h4 class="persona-column-title">{{ label }}</h4>
+                <div class="points-list">
+                  {% for turn in result.transcript %}
+                    {% if turn.argument.persona == persona %}
+                      <div class="point-item neutral">
+                        <span class="point-text">{{ turn.argument.summary|default:turn.argument.points|truncatewords:10 }}</span>
+                      </div>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% for persona, label in persona_labels.items %}
+        <div id="filter-{{ persona }}" class="filter-content">
+          <h3 class="section-title">{{ label }} - Key Points & Analysis</h3>
+          <div class="persona-section">
+            <div class="key-highlights">
+              {% for turn in result.transcript %}
+                {% if turn.argument.persona == persona %}
+                  {% if turn.argument.stance == 'positive' or 'positive' in turn.argument.points|lower %}
+                    <div class="highlight-item positive">
+                      <span class="highlight-icon">✓</span>
+                      <div class="highlight-text"><strong>Positive:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                    </div>
+                  {% elif turn.argument.stance == 'negative' or 'negative' in turn.argument.points|lower %}
+                    <div class="highlight-item negative">
+                      <span class="highlight-icon">✗</span>
+                      <div class="highlight-text"><strong>Negative:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                    </div>
+                  {% else %}
+                    <div class="highlight-item neutral">
+                      <span class="highlight-icon">○</span>
+                      <div class="highlight-text"><strong>Note:</strong> {{ turn.argument.summary|default:turn.argument.points }}</div>
+                    </div>
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            </div>
+
+            <div class="transcript-toggle">
+              <button class="transcript-toggle-btn" onclick="toggleTranscript('{{ persona }}')"><span class="toggle-icon">▼</span> Show Full Transcript</button>
+              <div class="transcript-content" id="transcript-{{ persona }}" style="display:none;">
+                {% for turn in result.transcript %}
+                  {% if turn.argument.persona == persona %}
+                    <div class="transcript-turn">
+                      <div class="turn-number">Turn {{ forloop.counter }}</div>
+                      <div class="turn-text">{{ turn.argument.points }}</div>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            </div>
+
           </div>
         </div>
       {% endfor %}
-    </div>
-  </section>
 
-  <section class="panel">
-    <h3>Debate transcript</h3>
-    <div class="transcript">
-      {% for turn in result.transcript %}
-        <article class="turn">
-          <header>
-            <strong>{{ turn.argument.persona_name }}</strong>
-            <span>Round {{ turn.round }}</span>
-            <span>{{ turn.argument.stance }}</span>
-            <span>Confidence {{ turn.argument.confidence }}</span>
-          </header>
-          <ul>
-            {% for point in turn.argument.points %}
-              <li>
-                <span>{{ point.claim }}</span>
-                {% if point.cited_metric %}
-                  <small>{{ point.cited_metric }}</small>
-                {% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-        </article>
-      {% endfor %}
     </div>
-  </section>
+
+    <div class="action-section"><button class="back-button" onclick="goHome()">Debate another stock</button></div>
+  </div>
 {% endif %}
+
+<div id="stats-modal" class="stats-modal" onclick="closeStatsModal()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeStatsModal()">×</button>
+    <div class="modal-header"><div id="modal-icon" class="modal-icon"></div><h2 id="modal-title"></h2></div>
+    <div class="modal-stats"><div class="stat-row"><span class="stat-name">Grounding Score</span><span class="stat-val" id="modal-grounding"></span></div>
+    <div class="stat-row"><span class="stat-name">Confidence</span><span class="stat-val" id="modal-confidence"></span></div>
+    <div class="stat-row"><span class="stat-name">Final Weight</span><span class="stat-val" id="modal-weight"></span></div></div>
+  </div>
+</div>
+
+<div id="stats-tooltip" class="stats-tooltip" style="display:none;position:fixed;z-index:1200;pointer-events:none;">
+  <div class="tooltip-inner">
+    <div class="tt-name" style="font-weight:700;margin-bottom:6px;color:var(--text-primary)"></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Grounding:</span> <span class="tt-grounding" style="margin-left:6px;color:var(--accent);"></span></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Confidence:</span> <span class="tt-confidence" style="margin-left:6px;color:var(--accent);"></span></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Weight:</span> <span class="tt-weight" style="margin-left:6px;color:var(--accent);"></span></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const tooltip=document.getElementById('stats-tooltip');
+  document.querySelectorAll('.persona-playcard').forEach(card=>{
+    const persona=card.dataset.persona||'';
+    const conf=card.dataset.confidence||0;
+    const ground=card.dataset.grounding||0;
+    const weight=card.dataset.weight||0;
+    const scoreEl=card.querySelector('.score-value');
+    if(scoreEl){
+      scoreEl.addEventListener('mouseenter', function(e){
+        tooltip.style.display='block';
+        tooltip.querySelector('.tt-name').textContent=persona;
+        tooltip.querySelector('.tt-grounding').textContent=parseFloat(ground).toFixed(2);
+        tooltip.querySelector('.tt-confidence').textContent=parseFloat(conf).toFixed(2);
+        tooltip.querySelector('.tt-weight').textContent=parseFloat(weight).toFixed(3);
+      });
+      scoreEl.addEventListener('mousemove', function(e){
+        const x=e.clientX+12; const y=e.clientY+12; tooltip.style.left=x+'px'; tooltip.style.top=y+'px';
+      });
+      scoreEl.addEventListener('mouseleave', function(){ tooltip.style.display='none'; });
+    }
+  });
+});
+
+function goHome(){window.location.href='/';}
+function selectTicker(t){const f=document.querySelector('.search-form');if(f){const i=f.querySelector('input[name="ticker"]');if(i)i.value=t;f.submit();}}
+function switchDebateFilter(filter){document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));const b=document.querySelector(`[data-filter="${filter}"]`);if(b)b.classList.add('active');document.querySelectorAll('.filter-content').forEach(c=>c.classList.remove('active'));const el=document.getElementById(`filter-${filter}`);if(el)el.classList.add('active');}
+function toggleTranscript(persona){const content=document.getElementById(`transcript-${persona}`);if(!content)return;content.style.display=(content.style.display==='none'||content.style.display==='')?'block':'none';}
+function showStatsModal(persona,confidence,grounding,weight){const modal=document.getElementById('stats-modal');document.getElementById('modal-title').textContent=persona;document.getElementById('modal-grounding').textContent=(grounding||0).toFixed(2);document.getElementById('modal-confidence').textContent=(confidence||0).toFixed(2);document.getElementById('modal-weight').textContent=(weight||0).toFixed(3);modal.classList.add('active');}
+function closeStatsModal(){document.getElementById('stats-modal').classList.remove('active');}
+</script>
+
 {% endblock %}

@@ -21,6 +21,15 @@ PERSONA_LABELS = {
     "neutral": "RiskManager",
 }
 
+# Suggested tickers for the landing page
+SUGGESTED_TICKERS = [
+    "RELIANCE.NS",
+    "TCS.NS",
+    "INFY.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+]
+
 
 def home(request):
     form = TickerForm()
@@ -39,6 +48,7 @@ def home(request):
             "persona_labels": PERSONA_LABELS,
             "rejected_claims": [],
             "disclaimer": None,
+            "suggested_tickers": SUGGESTED_TICKERS,
         },
     )
 
@@ -86,7 +96,7 @@ def run_debate_view(request):
             logger.info(f"Successfully processed debate result with {len(rejected_claims)} persona claims")
         except Exception as exc:  # keep the dashboard usable when data or models fail
             logger.exception(f"Exception in run_debate for {ticker}: {exc}")
-            error = f"Debate failed for {ticker}: {exc}"
+            error = f"Debate failed for **{ticker}**: {exc}"
     elif form.errors:
         error = "Select a valid company ticker."
 
@@ -105,5 +115,6 @@ def run_debate_view(request):
             "persona_labels": PERSONA_LABELS,
             "rejected_claims": rejected_claims,
             "disclaimer": disclaimer,
+            "suggested_tickers": SUGGESTED_TICKERS,
         },
     )
