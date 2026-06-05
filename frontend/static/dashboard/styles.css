@@ -520,6 +520,24 @@ body {
   flex-wrap: wrap;
 }
 
+/* Updates playcard (right-side) */
+.updates-card {
+  width: 260px;
+  min-width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 1rem;
+  flex-shrink: 0;
+}
+.updates-card h4 { margin: 0 0 0.5rem 0; font-size: 1rem; color: var(--text-primary); }
+.updates-body { max-height: 220px; overflow: auto; padding-right: 6px; }
+.updates-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.update-item { padding: 0.5rem; border-radius: 8px; background: rgba(15,23,42,0.35); }
+.update-time { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+.update-text { font-size: 0.9rem; color: var(--text-secondary); }
+.updates-empty { color: var(--text-muted); font-size: 0.9rem; }
+
 .pie-charts-section {
   display: flex;
   gap: 1.5rem;
