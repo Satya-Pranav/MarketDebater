@@ -1,13 +1,14 @@
-"""Microsoft Agent Framework debate path — Phase 4.
+"""Microsoft Agent Framework debate path.
 
-Runs the persona debate using Microsoft Agent Framework `ChatAgent`s (one per
+Runs the persona debate using Microsoft Agent Framework ``ChatAgent``s (one per
 persona) backed by the same Azure AI Foundry OpenAI-compatible endpoint the rest
-of the app uses. It yields the **same event stream** as the built-in orchestrator
-(`data` / `argument` / `verdict`), so the UI and CLI are unchanged.
+of the app uses. Yields the **same event stream** as the built-in orchestrator
+(``data`` / ``argument`` / ``verdict``), so the UI and CLI are unchanged.
 
-Selected via `USE_AGENT_FRAMEWORK=1`. Requires `agent-framework` (Python 3.10+):
+Selected via ``USE_AGENT_FRAMEWORK=1``. Requires ``agent-framework`` (Python 3.10+):
     pip install -r requirements-maf.txt
-The Chair's deterministic verifier + judge are reused as-is from `chair.py`.
+The Chair's deterministic verifier + judge are reused as-is from ``chair.py``.
+Personas route to ``PERSONA_R1_DEPLOYMENT`` when set, matching the built-in path.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ def _build_client():
     return OpenAIChatClient(
         base_url=base + "/",
         api_key=config.AZURE_OPENAI_API_KEY,
-        model=config.PERSONA_DEPLOYMENT,
+        model=config.PERSONA_R1_DEPLOYMENT or config.PERSONA_DEPLOYMENT,
     )
 
 
@@ -47,7 +48,9 @@ def _shape(arg: dict[str, Any], persona: str, rnd: int) -> dict[str, Any]:
     return arg
 
 
-async def _run_rounds(snapshot: dict, news: list) -> tuple[list[dict], dict[str, dict]]:
+async def _run_rounds(
+    snapshot: dict, news: list, filings: list
+) -> tuple[list[dict], dict[str, dict]]:
     """Run all persona turns inside one async context (MAF telemetry uses contextvars,
     so a single event loop avoids cross-context token errors)."""
     client = _build_client()
@@ -69,7 +72,15 @@ async def _run_rounds(snapshot: dict, news: list) -> tuple[list[dict], dict[str,
         for persona in PERSONA_ORDER:
             others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
             evidence = search_client.retrieve(PERSONA_QUERY[persona], snapshot.get("ticker", ""))
-            user = _build_user_prompt(snapshot, news, others, evidence=evidence)
+            user = _build_user_prompt(
+                snapshot,
+                news,
+                filings=filings,
+                opponents=others,
+                evidence=evidence,
+                round_num=rnd,
+                final_round=(rnd == rounds and rounds > 1),
+            )
             resp = await agents[persona].run(user)
             text = getattr(resp, "text", None) or str(resp)
             arg = _shape(_parse_json(text), persona, rnd)
@@ -83,11 +94,19 @@ def stream_debate_maf(ticker: str) -> Iterator[dict[str, Any]]:
     """Debate via MAF agents; yields data/argument/verdict events (sync generator)."""
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
-    yield {"type": "data", "snapshot": snapshot, "news": news}
+    filings = data.get("filings", [])
+    yield {
+        "type": "data",
+        "snapshot": snapshot,
+        "news": news,
+        "filings": filings,
+        "filings_metrics": data.get("filings_metrics", {}),
+    }
 
-    search_client.index_news(ticker, news)  # no-op unless Azure AI Search is configured
+    search_client.index_news(ticker, news)
+    search_client.index_filings(ticker, filings)
 
-    events, latest = asyncio.run(_run_rounds(snapshot, news))
+    events, latest = asyncio.run(_run_rounds(snapshot, news, filings))
     yield from events
 
     verdict = judge(latest, snapshot, news)
