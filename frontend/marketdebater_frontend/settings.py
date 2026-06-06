@@ -45,6 +45,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves Django static files directly from gunicorn in prod.
+    # Must sit right after SecurityMiddleware per WhiteNoise docs.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -106,9 +109,12 @@ if not DEBUG:
     SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
     X_FRAME_OPTIONS = "DENY"
 
-# Allow PythonAnywhere domain
+# Always-trusted origins for local dev + common managed hosts.
+# Add deployment-specific origins (e.g. https://yourapp.up.railway.app, custom
+# domains) via the DJANGO_CSRF_TRUSTED_ORIGINS env var as a comma-separated list.
 CSRF_TRUSTED_ORIGINS = [
-    'https://*.pythonanywhere.com',
-    'http://localhost',
-    'http://127.0.0.1'
-]
+    "http://localhost",
+    "http://127.0.0.1",
+    "https://*.pythonanywhere.com",
+    "https://*.up.railway.app",
+] + [o.strip() for o in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
