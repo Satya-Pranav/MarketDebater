@@ -24,6 +24,11 @@ streamlit>=1.36
 
 # Django frontend (keep for the Django UI)
 Django>=5.0
+# Production WSGI server (Azure App Service runs this)
+gunicorn>=22.0
+# Static-file middleware so Django serves its own static assets in prod
+# without needing nginx / Azure Storage.
+whitenoise>=6.7
 
 # Tests
 pytest>=8.0
