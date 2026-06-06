@@ -18,9 +18,13 @@ from .data_aggregator import aggregate
 PERSONA_ORDER = ["bull", "bear", "neutral"]
 
 
-def run_debate(ticker: str) -> dict[str, Any]:
-    """Full pipeline: aggregate data -> debate rounds -> chair verdict."""
-    return _collect(stream_debate(ticker))
+def run_debate(ticker: str, rounds: int | None = None) -> dict[str, Any]:
+    """Full pipeline: aggregate data -> debate rounds -> chair verdict.
+
+    ``rounds`` overrides ``config.DEBATE_ROUNDS`` for this call (lets the UI
+    expose a debate-depth slider without mutating global config).
+    """
+    return _collect(stream_debate(ticker, rounds=rounds))
 
 
 def _use_maf() -> bool:
@@ -32,7 +36,7 @@ def _use_maf() -> bool:
     return importlib.util.find_spec("agent_framework") is not None
 
 
-def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
+def stream_debate(ticker: str, rounds: int | None = None) -> Iterator[dict[str, Any]]:
     """Yield debate events as they happen (for the Streamlit live transcript).
 
     Event types: 'data', 'argument', 'verdict'. Delegates to the Microsoft Agent
@@ -41,7 +45,7 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     if _use_maf():
         from .orchestrator_maf import stream_debate_maf
 
-        yield from stream_debate_maf(ticker)
+        yield from stream_debate_maf(ticker, rounds=rounds)
         return
 
     data = aggregate(ticker)
@@ -59,7 +63,7 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     search_client.index_news(ticker, news)
     search_client.index_filings(ticker, filings)
 
-    rounds = max(1, config.DEBATE_ROUNDS)
+    rounds = max(1, rounds if rounds is not None else config.DEBATE_ROUNDS)
     latest: dict[str, dict] = {}
 
     for rnd in range(1, rounds + 1):
