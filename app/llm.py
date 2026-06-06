@@ -15,14 +15,52 @@ DeepSeek-R1 (reasoning model) is handled by passing ``is_reasoning_model=True``:
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
 from . import config
 
+logger = logging.getLogger(__name__)
+
 
 class _NoJsonError(ValueError):
     """Model returned reasoning but no usable JSON. Worth one retry."""
+
+
+def _call_with_retry(client, **kwargs):
+    """Call chat.completions.create with exponential backoff on 429s.
+
+    Foundry-served DeepSeek-V4-Flash hits per-minute throughput caps under
+    concurrent load (a 3-persona x 3-round debate is 9+ calls in <20s).
+    Three retries at 2s/4s/8s typically clears it.
+    """
+    from openai import APIError, RateLimitError
+
+    delays = (2.0, 4.0, 8.0)
+    last_err: Exception | None = None
+    for attempt, delay in enumerate((0.0, *delays)):
+        if delay:
+            time.sleep(delay)
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError as exc:
+            last_err = exc
+            logger.warning(
+                "LLM rate-limited (attempt %d/%d): %s", attempt + 1, len(delays) + 1, exc
+            )
+            continue
+        except APIError as exc:
+            # 5xx-style transient errors are also worth retrying once or twice.
+            status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+            if status and 500 <= status < 600 and attempt < len(delays):
+                last_err = exc
+                logger.warning("LLM transient %s (attempt %d): %s", status, attempt + 1, exc)
+                continue
+            raise
+    assert last_err is not None
+    raise last_err
 
 
 def chat_json(
@@ -80,9 +118,10 @@ def chat_json(
     try:
         if is_reasoning_model:
             # R1 rejects response_format; lean on the prompt + robust parsing.
-            resp = client.chat.completions.create(**base_kwargs, temperature=temperature)
+            resp = _call_with_retry(client, **base_kwargs, temperature=temperature)
         else:
-            resp = client.chat.completions.create(
+            resp = _call_with_retry(
+                client,
                 **base_kwargs,
                 temperature=temperature,
                 response_format={"type": "json_object"},
@@ -90,7 +129,7 @@ def chat_json(
     except Exception:
         # Some Foundry catalog models reject response_format / custom temperature;
         # fall back to a bare call and lean on the prompt + robust parsing.
-        resp = client.chat.completions.create(**base_kwargs)
+        resp = _call_with_retry(client, **base_kwargs)
 
     raw = resp.choices[0].message.content or "{}"
     try:
@@ -106,8 +145,8 @@ def chat_json(
             },
             {"role": "user", "content": user},
         ]
-        resp = client.chat.completions.create(
-            model=model, messages=retry_messages, max_tokens=4000, temperature=temperature
+        resp = _call_with_retry(
+            client, model=model, messages=retry_messages, max_tokens=4000, temperature=temperature
         )
         return _parse_json(resp.choices[0].message.content or "{}")
 

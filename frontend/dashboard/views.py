@@ -6,10 +6,15 @@ import logging
 import re
 import time
 
+from django.contrib import messages
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
+from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from app import config, storage
 from app.orchestrator import run_debate
+from app.scan import scan_universe
 
 from .forms import TickerForm
 
@@ -83,6 +88,8 @@ def run_debate_view(request):
     logger.info(f"Form is_valid: {form.is_valid()}")
     logger.info(f"Form errors: {form.errors}")
     
+    persisted_to_board = False
+    arguments_by_persona: dict[str, list] = {p: [] for p in PERSONA_LABELS}
     if form.is_valid():
         ticker = form.cleaned_data["ticker"]
         rounds = form.cleaned_data.get("rounds") or config.DEBATE_ROUNDS
@@ -93,7 +100,23 @@ def run_debate_view(request):
             result = run_debate(ticker, rounds=rounds)
             elapsed = time.time() - start
             logger.info(f"run_debate completed in {elapsed:.2f}s")
-            
+
+            # Push the verdict to the daily-suggestions leaderboard. put_verdict
+            # overwrites any prior entry for this ticker on today's date, then
+            # write_merged_index reranks the leaderboard from per-ticker blobs.
+            # Silently no-ops when storage isn't configured.
+            if storage.is_configured() and result and result.get("verdict"):
+                try:
+                    date = storage.today_date()
+                    payload = storage.to_persisted_payload(ticker, result)
+                    if storage.put_verdict(date, ticker, payload):
+                        storage.write_merged_index(date)
+                        persisted_to_board = True
+                        logger.info(f"Persisted {ticker} to leaderboard for {date}")
+                except Exception as persist_exc:
+                    # Persistence failure must not break the user's verdict view.
+                    logger.exception(f"Failed to persist {ticker} to leaderboard: {persist_exc}")
+
             # Clean rationale to remove [MOCK] prefix
             if result and result.get("verdict") and result["verdict"].get("rationale"):
                 result["verdict"]["rationale"] = clean_rationale(result["verdict"]["rationale"])
@@ -108,6 +131,25 @@ def run_debate_view(request):
                 }
                 for persona, label in PERSONA_LABELS.items()
             ]
+
+            # Group transcript turns by persona so the deep-dive tabs render
+            # each persona's points across all rounds. Sorted by round ascending.
+            for turn in result.get("transcript", []) or []:
+                arg = turn.get("argument") or {}
+                persona_key = arg.get("persona")
+                if persona_key in arguments_by_persona:
+                    arguments_by_persona[persona_key].append(arg)
+            for persona_key in arguments_by_persona:
+                arguments_by_persona[persona_key].sort(key=lambda a: a.get("round", 0))
+
+            # Stash total round count on the result so round labels in the
+            # template can decide between Case / Rebuttal / Closing suffixes.
+            timings_meta = result.get("timings") or {}
+            total_rounds = timings_meta.get("rounds") or max(
+                (a.get("round", 0) for args in arguments_by_persona.values() for a in args),
+                default=rounds or config.DEBATE_ROUNDS,
+            )
+            result["debate_rounds"] = total_rounds
             logger.info(f"Successfully processed debate result with {len(rejected_claims)} persona claims")
         except Exception as exc:  # keep the dashboard usable when data or models fail
             logger.exception(f"Exception in run_debate for {ticker}: {exc}")
@@ -135,6 +177,8 @@ def run_debate_view(request):
             "rejected_claims": rejected_claims,
             "disclaimer": disclaimer,
             "suggested_tickers": SUGGESTED_TICKERS,
+            "persisted_to_board": persisted_to_board,
+            "arguments_by_persona": arguments_by_persona,
         },
     )
 
@@ -187,5 +231,47 @@ def leaderboard_view(request):
             "storage_configured": storage_configured,
             "storage_hint": storage_hint,
             "persona_labels": PERSONA_LABELS,
+            "default_scan_tickers": ",".join(SUGGESTED_TICKERS),
         },
     )
+
+
+@require_POST
+def run_scan_view(request):
+    """Trigger an inline cross-stock scan and persist verdicts.
+
+    Synchronous: blocks the request until the scan completes. To keep the demo
+    snappy we default to 1 round and the 5-ticker suggested list — at ~10-20s
+    per ticker on V4-Flash that's ~1-2min total. Wraps `app.scan.scan_universe`
+    which handles per-ticker failures + index rebuild.
+    """
+    raw = (request.POST.get("tickers") or "").strip()
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()] or list(SUGGESTED_TICKERS)
+    try:
+        rounds = int(request.POST.get("rounds") or 1)
+    except ValueError:
+        rounds = 1
+    rounds = max(1, min(5, rounds))
+
+    if not storage.is_configured():
+        messages.error(
+            request,
+            "Storage isn't configured. Set AZURE_STORAGE_CONNECTION_STRING or "
+            "LOCAL_RESULTS_DIR=./out in .env before running a scan.",
+        )
+        return HttpResponseRedirect(reverse("leaderboard"))
+
+    start = time.time()
+    logger.info(f"Triggering inline scan: tickers={tickers} rounds={rounds}")
+    try:
+        payload = scan_universe(tickers=tickers, rounds=rounds)
+        elapsed = time.time() - start
+        ok = len(payload.get("ranked", []))
+        messages.success(
+            request,
+            f"Scan complete in {elapsed:.1f}s — {ok} ticker(s) ranked at {rounds} round(s).",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception(f"Scan failed: {exc}")
+        messages.error(request, f"Scan failed: {exc}")
+    return HttpResponseRedirect(reverse("leaderboard"))
