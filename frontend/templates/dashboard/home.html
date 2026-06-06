@@ -8,6 +8,12 @@
   <div class="warning-text">⚠️ This product is only for educational purposes. Not financial advice.</div>
 </div>
 
+{# Top nav #}
+<div class="top-nav">
+  <a class="top-nav-link {% if not submitted %}active{% endif %}" href="{% url 'home' %}">Single Debate</a>
+  <a class="top-nav-link" href="{% url 'leaderboard' %}">Daily Suggestions</a>
+</div>
+
 {# Landing: search form #}
 {% if not submitted %}
   <div class="landing-container">
@@ -17,7 +23,7 @@
           <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 4 L44 40 L4 40 Z" stroke="#38bdf8" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
         </div>
         <h1 class="landing-title">MarketDebater Swarm</h1>
-        <p class="landing-subtitle">AI-powered debate on any NSE stock</p>
+        <p class="landing-subtitle">AI-powered debate on any US stock</p>
       </div>
 
       <form method="post" action="{% url 'run-debate' %}" class="search-form">
@@ -26,13 +32,18 @@
           {{ form.ticker }}
           <button type="submit" class="search-button">Debate</button>
         </div>
+        <div class="search-options">
+          <label class="rounds-label" for="{{ form.rounds.id_for_label }}">Rounds:</label>
+          {{ form.rounds }}
+          <span class="rounds-hint">More rounds = deeper rebuttal, slower run.</span>
+        </div>
         {% if error %}
           <div class="search-error">{{ error }}</div>
         {% endif %}
       </form>
 
       <div class="suggested-section">
-        <p class="suggested-label">Try these NSE stocks:</p>
+        <p class="suggested-label">Try these US stocks:</p>
         <div class="ticker-chips">
           {% for ticker in suggested_tickers %}
             <button type="button" class="ticker-chip" onclick="selectTicker('{{ ticker }}')">{{ ticker }}</button>
@@ -58,7 +69,7 @@
           <span class="ticker-badge">{{ result.snapshot.ticker }}</span>
         </div>
         <div class="snapshot-price">
-          <div class="price-value">₹{{ result.snapshot.price }}</div>
+          <div class="price-value">{% if result.snapshot.currency == 'USD' %}${% elif result.snapshot.currency == 'INR' %}₹{% elif result.snapshot.currency == 'EUR' %}€{% elif result.snapshot.currency == 'GBP' %}£{% else %}{{ result.snapshot.currency }} {% endif %}{{ result.snapshot.price }}</div>
           <div class="price-change {% if result.snapshot.change_pct >= 0 %}positive{% else %}negative{% endif %}">
             {{ result.snapshot.change_pct|floatformat:2 }}%
           </div>

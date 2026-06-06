@@ -49,7 +49,7 @@ def _shape(arg: dict[str, Any], persona: str, rnd: int) -> dict[str, Any]:
 
 
 async def _run_rounds(
-    snapshot: dict, news: list, filings: list
+    snapshot: dict, news: list, filings: list, rounds: int | None = None
 ) -> tuple[list[dict], dict[str, dict]]:
     """Run all persona turns inside one async context (MAF telemetry uses contextvars,
     so a single event loop avoids cross-context token errors)."""
@@ -59,7 +59,7 @@ async def _run_rounds(
         for p in PERSONA_ORDER
     }
 
-    rounds = max(1, config.DEBATE_ROUNDS)
+    rounds = max(1, rounds if rounds is not None else config.DEBATE_ROUNDS)
     latest: dict[str, dict] = {}
     events: list[dict] = []
 
@@ -90,7 +90,7 @@ async def _run_rounds(
     return events, latest
 
 
-def stream_debate_maf(ticker: str) -> Iterator[dict[str, Any]]:
+def stream_debate_maf(ticker: str, rounds: int | None = None) -> Iterator[dict[str, Any]]:
     """Debate via MAF agents; yields data/argument/verdict events (sync generator)."""
     data = aggregate(ticker)
     snapshot, news = data["snapshot"], data["news"]
@@ -106,7 +106,7 @@ def stream_debate_maf(ticker: str) -> Iterator[dict[str, Any]]:
     search_client.index_news(ticker, news)
     search_client.index_filings(ticker, filings)
 
-    events, latest = asyncio.run(_run_rounds(snapshot, news, filings))
+    events, latest = asyncio.run(_run_rounds(snapshot, news, filings, rounds=rounds))
     yield from events
 
     verdict = judge(latest, snapshot, news)

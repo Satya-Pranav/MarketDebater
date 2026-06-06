@@ -7,33 +7,52 @@ import re
 from django import forms
 
 
+ROUND_CHOICES = [
+    (1, "1 round (opening only)"),
+    (2, "2 rounds (case + rebuttal)"),
+    (3, "3 rounds (case + rebuttal + closing)"),
+    (4, "4 rounds"),
+    (5, "5 rounds"),
+]
+
+
 class TickerForm(forms.Form):
     """Form for submitting a stock ticker symbol."""
-    
+
     ticker = forms.CharField(
-        label="Enter NSE ticker (e.g., RELIANCE.NS)",
+        label="Enter US ticker (e.g., AAPL)",
         max_length=20,
         required=True,
         widget=forms.TextInput(
             attrs={
                 "class": "ticker-input",
-                "placeholder": "e.g. RELIANCE.NS",
+                "placeholder": "e.g. AAPL",
                 "autocomplete": "off",
             }
         ),
     )
+    rounds = forms.TypedChoiceField(
+        label="Debate rounds",
+        choices=ROUND_CHOICES,
+        coerce=int,
+        initial=3,
+        required=False,
+        widget=forms.Select(attrs={"class": "rounds-select"}),
+    )
 
     def clean_ticker(self) -> str:
-        """Validate ticker format (NSE/BSE style: SYMBOL.NS or SYMBOL.BO)."""
+        """Validate ticker format (US plain symbol; legacy NSE/BSE suffix still allowed)."""
         ticker = self.cleaned_data.get("ticker", "").strip().upper()
-        
+
         if not ticker:
             raise forms.ValidationError("Please enter a ticker symbol.")
-        
-        # Allow NSE (.NS) or BSE (.BO) suffix, or custom format
-        if not re.fullmatch(r"[A-Z0-9]{1,10}(\.[A-Z]{2})?", ticker):
+
+        # Accept US-style plain tickers (AAPL, GOOGL, BRK.B) and the legacy NSE/BSE
+        # suffix shape (RELIANCE.NS) — the backend pivoted to US but the regex
+        # stays permissive so old bookmarks don't 400.
+        if not re.fullmatch(r"[A-Z0-9]{1,10}(\.[A-Z]{1,2})?", ticker):
             raise forms.ValidationError(
-                "Invalid ticker format. Use format like RELIANCE.NS or TCS.NS"
+                "Invalid ticker format. Use a US symbol like AAPL or MSFT."
             )
-        
+
         return ticker

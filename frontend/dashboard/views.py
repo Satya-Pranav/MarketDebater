@@ -8,7 +8,7 @@ import time
 
 from django.shortcuts import render
 
-from app import config
+from app import config, storage
 from app.orchestrator import run_debate
 
 from .forms import TickerForm
@@ -22,13 +22,13 @@ PERSONA_LABELS = {
     "neutral": "RiskManager",
 }
 
-# Suggested tickers for the landing page
+# Suggested tickers for the landing page (US watchlist — matches .env DEFAULT_TICKERS).
 SUGGESTED_TICKERS = [
-    "RELIANCE.NS",
-    "TCS.NS",
-    "INFY.NS",
-    "HDFCBANK.NS",
-    "ICICIBANK.NS",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "NVDA",
+    "AMZN",
 ]
 
 
@@ -85,11 +85,12 @@ def run_debate_view(request):
     
     if form.is_valid():
         ticker = form.cleaned_data["ticker"]
-        logger.info(f"Processing ticker: {ticker}")
+        rounds = form.cleaned_data.get("rounds") or config.DEBATE_ROUNDS
+        logger.info(f"Processing ticker: {ticker} (rounds={rounds})")
         try:
             logger.info("Calling run_debate...")
             start = time.time()
-            result = run_debate(ticker)
+            result = run_debate(ticker, rounds=rounds)
             elapsed = time.time() - start
             logger.info(f"run_debate completed in {elapsed:.2f}s")
             
@@ -134,5 +135,57 @@ def run_debate_view(request):
             "rejected_claims": rejected_claims,
             "disclaimer": disclaimer,
             "suggested_tickers": SUGGESTED_TICKERS,
+        },
+    )
+
+
+def leaderboard_view(request):
+    """Daily suggestions: ranked cross-stock leaderboard for the requested date.
+
+    Reads ``verdicts/<date>/index.json`` (or ``verdicts/latest/index.json``)
+    via ``app.storage``. ``?date=YYYY-MM-DD`` picks a specific scan; the default
+    is ``latest``. Handles both Blob and ``LOCAL_RESULTS_DIR`` modes, and
+    degrades gracefully when storage isn't configured or no scans have run.
+    """
+    requested_date = request.GET.get("date", "latest").strip() or "latest"
+    available_dates = []
+    payload = None
+    storage_configured = storage.is_configured()
+    storage_hint = None
+
+    if storage_configured:
+        try:
+            available_dates = sorted(storage.list_dates(), reverse=True)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(f"list_dates failed: {exc}")
+            available_dates = []
+        try:
+            payload = storage.get_index(requested_date)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(f"get_index({requested_date}) failed: {exc}")
+            payload = None
+    else:
+        storage_hint = (
+            "No storage configured. Set AZURE_STORAGE_CONNECTION_STRING (Blob) or "
+            "LOCAL_RESULTS_DIR=./out (filesystem) in .env, then run "
+            "`python -m app.scan` to populate verdicts."
+        )
+
+    ranked = (payload or {}).get("ranked", []) or []
+    actual_date = (payload or {}).get("date", "") if payload else ""
+    generated_at = (payload or {}).get("generated_at", "") if payload else ""
+
+    return render(
+        request,
+        "dashboard/leaderboard.html",
+        {
+            "requested_date": requested_date,
+            "actual_date": actual_date,
+            "generated_at": generated_at,
+            "ranked": ranked,
+            "available_dates": available_dates,
+            "storage_configured": storage_configured,
+            "storage_hint": storage_hint,
+            "persona_labels": PERSONA_LABELS,
         },
     )

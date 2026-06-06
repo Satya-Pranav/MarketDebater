@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+{% block title %}Daily Suggestions · MarketDebater Swarm{% endblock %}
+{% block content %}
+
+{# Warning Banner #}
+<div class="warning-banner">
+  <div class="warning-text">⚠️ This product is only for educational purposes. Not financial advice.</div>
+</div>
+
+{# Top nav #}
+<div class="top-nav">
+  <a class="top-nav-link" href="{% url 'home' %}">Single Debate</a>
+  <a class="top-nav-link active" href="{% url 'leaderboard' %}">Daily Suggestions</a>
+</div>
+
+<div class="results-container">
+  <div class="leaderboard-header">
+    <div>
+      <h2 class="leaderboard-title">Daily Suggestions</h2>
+      <p class="leaderboard-subtitle">Cross-stock ranking from the most recent scan (sorted by <code>net_bull_score</code> = bull weight − bear weight).</p>
+    </div>
+    <form method="get" class="leaderboard-controls">
+      <label for="date-picker">Scan date:</label>
+      <select id="date-picker" name="date" onchange="this.form.submit()">
+        <option value="latest" {% if requested_date == 'latest' %}selected{% endif %}>latest</option>
+        {% for d in available_dates %}
+          <option value="{{ d }}" {% if requested_date == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+
+  {% if storage_hint %}
+    <div class="panel leaderboard-empty">
+      <h3>Storage not configured</h3>
+      <p>{{ storage_hint }}</p>
+    </div>
+  {% elif not ranked %}
+    <div class="panel leaderboard-empty">
+      <h3>No suggestions yet</h3>
+      <p>
+        No leaderboard data found for <code>{{ requested_date }}</code>.
+        Run a scan to populate it:
+      </p>
+      <pre class="leaderboard-code">LOCAL_RESULTS_DIR=./out python -m app.scan --tickers AAPL,MSFT,NVDA</pre>
+      <p class="leaderboard-empty-foot">
+        Or trigger the GitHub Actions <code>nightly-scan</code> workflow (manual dispatch) to write into Azure Blob.
+      </p>
+    </div>
+  {% else %}
+    <div class="panel leaderboard-meta">
+      <span><strong>Date:</strong> {{ actual_date|default:requested_date }}</span>
+      <span><strong>Generated:</strong> {{ generated_at }}</span>
+      <span><strong>Tickers ranked:</strong> {{ ranked|length }}</span>
+    </div>
+
+    <div class="panel leaderboard-table-wrap">
+      <table class="leaderboard-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Verdict</th>
+            <th class="num">Net Bull</th>
+            <th class="num">Bull w</th>
+            <th class="num">Bear w</th>
+            <th class="num">Neutral w</th>
+            <th>As of</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in ranked %}
+            {% with v=r.verdict|default:'Hold' %}
+              <tr>
+                <td>{{ forloop.counter }}</td>
+                <td><span class="lb-ticker">{{ r.ticker }}</span></td>
+                <td class="lb-company">{{ r.company|default:r.ticker }}</td>
+                <td>
+                  <span class="lb-verdict
+                    {% if v == 'Strong Buy' %}lb-verdict-strong-buy
+                    {% elif v == 'Accumulate' %}lb-verdict-accumulate
+                    {% elif v == 'Hold' %}lb-verdict-hold
+                    {% elif v == 'Reduce' %}lb-verdict-reduce{% endif %}">{{ v }}</span>
+                </td>
+                <td class="num
+                  {% if r.net_bull_score >= 0 %}positive{% else %}negative{% endif %}">
+                  {{ r.net_bull_score|floatformat:3 }}
+                </td>
+                <td class="num">{{ r.weights.bull|default:0|floatformat:3 }}</td>
+                <td class="num">{{ r.weights.bear|default:0|floatformat:3 }}</td>
+                <td class="num">{{ r.weights.neutral|default:0|floatformat:3 }}</td>
+                <td class="lb-asof">{{ r.as_of|default:'—' }}</td>
+              </tr>
+              {% if r.rationale_short %}
+                <tr class="lb-rationale-row">
+                  <td></td>
+                  <td colspan="8" class="lb-rationale">{{ r.rationale_short }}</td>
+                </tr>
+              {% endif %}
+            {% endwith %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}
