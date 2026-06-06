@@ -11,5 +11,47 @@
   <main class="shell">
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="site-footer">
+    <span class="site-footer-text">MarketDebater Swarm · educational use only</span>
+    <span class="site-footer-sep">·</span>
+    <span class="contact-us-wrapper">
+      <a href="https://github.com/pranavps47"
+         target="_blank"
+         rel="noopener noreferrer"
+         class="contact-us"
+         onclick="openContactProfiles(event)"
+         aria-describedby="contact-card"
+         title="Opens both maintainers' GitHub profiles">Contact us</a>
+      <div class="contact-card" id="contact-card" role="tooltip">
+        <div class="contact-card-title">The team</div>
+        <a href="https://github.com/PVRPratyusha"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="contact-card-row">
+          <span class="contact-name">PVR Pratyusha</span>
+          <span class="contact-handle">@PVRPratyusha ↗</span>
+        </a>
+        <a href="https://github.com/pranavps47"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="contact-card-row">
+          <span class="contact-name">P Satya Pranav</span>
+          <span class="contact-handle">@pranavps47 ↗</span>
+        </a>
+      </div>
+    </span>
+  </footer>
+
+  <script>
+    function openContactProfiles(e){
+      // Open one URL via the native link (preserves the noopener target=_blank),
+      // and the other via window.open in the same user-gesture handler so popup
+      // blockers treat both as user-initiated.
+      try { window.open('https://github.com/PVRPratyusha', '_blank', 'noopener,noreferrer'); } catch(err) {}
+      // Default <a href="https://github.com/pranavps47" target="_blank"> behavior
+      // handles the second profile — no preventDefault() so the link still opens.
+    }
+  </script>
 </body>
 </html>

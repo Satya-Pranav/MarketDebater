@@ -14,7 +14,47 @@
   <a class="top-nav-link active" href="{% url 'leaderboard' %}">Daily Suggestions</a>
 </div>
 
+{# Loading overlay (shown while the scan runs) #}
+<div id="debate-loading" class="debate-loading" style="display:none;">
+  <div class="debate-loading-card">
+    <div class="debate-spinner"></div>
+    <div class="debate-loading-title">Running cross-stock scan</div>
+    <div class="debate-loading-sub">Debating each ticker · writing verdicts to storage · rebuilding the leaderboard.</div>
+    <div class="debate-loading-timer" id="debate-loading-timer">0s</div>
+    <div class="debate-loading-hint">5 tickers × 1 round on V4-Flash is usually 1–3 minutes. Don't close this tab.</div>
+  </div>
+</div>
+
 <div class="results-container">
+  {% if messages %}
+    <div class="panel" style="margin-bottom: 1rem;">
+      {% for m in messages %}
+        <div class="scan-status {% if m.tags == 'error' %}error{% else %}success{% endif %}">{{ m }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="panel scan-card">
+    <div class="scan-card-header">
+      <h3 class="scan-card-title">Run a fresh scan</h3>
+    </div>
+    <p class="scan-card-sub">
+      Trigger a synchronous scan from the browser. Writes verdicts to storage
+      ({% if storage_configured %}configured{% else %}<strong>not configured</strong>{% endif %})
+      and refreshes the ranking below. Default is the 5 suggested tickers at 1 round.
+    </p>
+    <form method="post" action="{% url 'run-scan' %}" class="scan-form" onsubmit="onScanSubmit(event)">
+      {% csrf_token %}
+      <input type="text" name="tickers" placeholder="AAPL,MSFT,GOOGL,NVDA,AMZN" value="{{ default_scan_tickers }}" autocomplete="off">
+      <select name="rounds">
+        <option value="1" selected>1 round (fast)</option>
+        <option value="2">2 rounds</option>
+        <option value="3">3 rounds</option>
+      </select>
+      <button type="submit" class="scan-btn" id="scan-submit"{% if not storage_configured %} disabled title="Configure storage first"{% endif %}>Run scan</button>
+    </form>
+  </div>
+
   <div class="leaderboard-header">
     <div>
       <h2 class="leaderboard-title">Daily Suggestions</h2>
@@ -106,5 +146,24 @@
     </div>
   {% endif %}
 </div>
+
+<script>
+function onScanSubmit(e){
+  const overlay=document.getElementById('debate-loading');
+  const timerEl=document.getElementById('debate-loading-timer');
+  const btn=document.getElementById('scan-submit');
+  if(btn){ btn.disabled=true; btn.textContent='Running...'; }
+  if(overlay){
+    overlay.style.display='flex';
+    const start=Date.now();
+    if(window.__scanTimer) clearInterval(window.__scanTimer);
+    window.__scanTimer=setInterval(()=>{
+      if(overlay.style.display==='none') return;
+      const s=Math.floor((Date.now()-start)/1000);
+      if(timerEl) timerEl.textContent=s+'s';
+    },1000);
+  }
+}
+</script>
 
 {% endblock %}

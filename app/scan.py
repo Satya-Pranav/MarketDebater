@@ -42,20 +42,7 @@ def _select_tickers(args: argparse.Namespace) -> list[str]:
     return universe_tickers
 
 
-def _to_persisted_payload(ticker: str, result: dict[str, Any]) -> dict[str, Any]:
-    """Trim run_debate() output to what's worth persisting per ticker."""
-    return {
-        "ticker": ticker.upper(),
-        "as_of": result.get("snapshot", {}).get("as_of", ""),
-        "snapshot": result.get("snapshot", {}),
-        "news": result.get("news", []),
-        "filings": result.get("filings", []),
-        "filings_metrics": result.get("filings_metrics", {}),
-        "arguments": result.get("arguments", {}),
-        "transcript": result.get("transcript", []),
-        "verdict": result.get("verdict", {}),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
+_to_persisted_payload = storage.to_persisted_payload  # backwards-compat alias
 
 
 def scan_universe(
@@ -64,8 +51,12 @@ def scan_universe(
     shards: int | None = None,
     tickers: list[str] | None = None,
     write_index: bool = True,
+    rounds: int | None = None,
 ) -> dict[str, Any]:
     """Run debates over the (optionally sharded) universe and persist results.
+
+    ``rounds`` overrides config.DEBATE_ROUNDS for each debate (useful for the
+    UI "Run scan" button, which defaults to a 1-round fast scan).
 
     Returns the merged index payload (or just per-ticker counts when ``write_index=False``).
     """
@@ -74,13 +65,13 @@ def scan_universe(
         tickers=",".join(tickers) if tickers else "", shard=shard, shards=shards
     )
     targets = _select_tickers(ns)
-    print(f"[scan] date={date}  shard={shard}/{shards}  tickers={len(targets)}")
+    print(f"[scan] date={date}  shard={shard}/{shards}  tickers={len(targets)}  rounds={rounds or 'default'}")
 
     failures: list[str] = []
     for i, ticker in enumerate(targets, 1):
         print(f"[scan] ({i}/{len(targets)}) {ticker} ...", flush=True)
         try:
-            result = run_debate(ticker)
+            result = run_debate(ticker, rounds=rounds)
             storage.put_verdict(date, ticker, _to_persisted_payload(ticker, result))
             v = result.get("verdict", {})
             print(
