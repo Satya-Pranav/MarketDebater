@@ -8,6 +8,7 @@ CLI:  python -m app.orchestrator AAPL
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any, Iterator
 
 from . import config, search_client
@@ -18,9 +19,13 @@ from .data_aggregator import aggregate
 PERSONA_ORDER = ["bull", "bear", "neutral"]
 
 
-def run_debate(ticker: str) -> dict[str, Any]:
-    """Full pipeline: aggregate data -> debate rounds -> chair verdict."""
-    return _collect(stream_debate(ticker))
+def run_debate(ticker: str, rounds: int | None = None) -> dict[str, Any]:
+    """Full pipeline: aggregate data -> debate rounds -> chair verdict.
+
+    ``rounds`` overrides ``config.DEBATE_ROUNDS`` for this call (lets the UI
+    expose a debate-depth slider without mutating global config).
+    """
+    return _collect(stream_debate(ticker, rounds=rounds))
 
 
 def _use_maf() -> bool:
@@ -32,7 +37,7 @@ def _use_maf() -> bool:
     return importlib.util.find_spec("agent_framework") is not None
 
 
-def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
+def stream_debate(ticker: str, rounds: int | None = None) -> Iterator[dict[str, Any]]:
     """Yield debate events as they happen (for the Streamlit live transcript).
 
     Event types: 'data', 'argument', 'verdict'. Delegates to the Microsoft Agent
@@ -41,10 +46,13 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     if _use_maf():
         from .orchestrator_maf import stream_debate_maf
 
-        yield from stream_debate_maf(ticker)
+        yield from stream_debate_maf(ticker, rounds=rounds)
         return
 
+    t_total0 = time.perf_counter()
+    t_data0 = time.perf_counter()
     data = aggregate(ticker)
+    t_data = time.perf_counter() - t_data0
     snapshot, news = data["snapshot"], data["news"]
     filings = data.get("filings", [])
     yield {
@@ -59,8 +67,10 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
     search_client.index_news(ticker, news)
     search_client.index_filings(ticker, filings)
 
-    rounds = max(1, config.DEBATE_ROUNDS)
+    rounds = max(1, rounds if rounds is not None else config.DEBATE_ROUNDS)
     latest: dict[str, dict] = {}
+    # persona_times[persona] = total seconds across all rounds for that persona
+    persona_times: dict[str, float] = {p: 0.0 for p in PERSONA_ORDER}
 
     for rnd in range(1, rounds + 1):
         opponents = (
@@ -70,6 +80,7 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
         )
         for persona in PERSONA_ORDER:
             others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
+            t_p0 = time.perf_counter()
             arg = run_persona(
                 persona,
                 snapshot,
@@ -79,11 +90,30 @@ def stream_debate(ticker: str) -> Iterator[dict[str, Any]]:
                 round_num=rnd,
                 final_round=(rnd == rounds and rounds > 1),
             )
+            persona_times[persona] += time.perf_counter() - t_p0
             arg["round"] = rnd
             latest[persona] = arg
             yield {"type": "argument", "round": rnd, "persona": persona, "argument": arg}
 
+    t_chair0 = time.perf_counter()
     verdict = judge(latest, snapshot, news)
+    t_chair = time.perf_counter() - t_chair0
+    t_total = time.perf_counter() - t_total0
+    timings = {
+        "data": round(t_data, 2),
+        "personas": {p: round(v, 2) for p, v in persona_times.items()},
+        "chair": round(t_chair, 2),
+        "total": round(t_total, 2),
+        "rounds": rounds,
+    }
+    print(
+        f"[timing] {ticker} debate: data={t_data:.1f}s "
+        f"bull={persona_times['bull']:.1f}s bear={persona_times['bear']:.1f}s "
+        f"neutral={persona_times['neutral']:.1f}s chair={t_chair:.1f}s "
+        f"total={t_total:.1f}s (rounds={rounds})",
+        flush=True,
+    )
+    yield {"type": "timings", "timings": timings}
     yield {"type": "verdict", "verdict": verdict, "arguments": latest}
 
 
@@ -96,6 +126,8 @@ def _collect(events: Iterator[dict[str, Any]]) -> dict[str, Any]:
             result["filings_metrics"] = ev.get("filings_metrics", {})
         elif ev["type"] == "argument":
             result["transcript"].append(ev)
+        elif ev["type"] == "timings":
+            result["timings"] = ev["timings"]
         elif ev["type"] == "verdict":
             result["verdict"], result["arguments"] = ev["verdict"], ev["arguments"]
     return result

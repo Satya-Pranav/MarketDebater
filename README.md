@@ -105,30 +105,34 @@ deterministic verifier before any verdict is rendered.
 
 ## Repository layout
 
+The repository contains two complementary frontends and a central `app/` package that implements the core swarm logic. The `app/` package is the canonical, shareable runtime used by the scan and streamlit interfaces; the Django `frontend/` app is a separate UI wrapper maintained by the frontend collaborator.
+
+High level layout (important paths):
+
 ```
 MarketDebater/
-├── app/
+├── app/                        # core swarm implementation (agents, chair, orchestrator, clients)
 │   ├── data/watchlist.txt      # curated 25-ticker default universe (one per line)
 │   ├── universe.py             # read watchlist by default; Google Sheet opt-in
 │   ├── prices_client.py        # yfinance + hand-rolled technicals
 │   ├── news_client.py          # Grok web search (RSS fallback)
 │   ├── filings_client.py       # sec-api.io 10-K/10-Q/8-K + XBRL fundamentals
 │   ├── data_aggregator.py      # parallel fanout to the three clients
-│   ├── llm.py                  # OpenAI-compatible chat client; R1-aware JSON parsing
-│   ├── agents.py               # Bull / Bear / Risk personas (route to R1 when set)
-│   ├── chair.py                # deterministic verifier + LLM-as-judge + net_bull_score
-│   ├── orchestrator.py         # 3-round debate; streams data/argument/verdict events
-│   ├── orchestrator_maf.py     # optional Microsoft Agent Framework path (same events)
-│   ├── search_client.py        # Azure AI Search (index_news + index_filings + retrieve)
-│   ├── storage.py              # Azure Blob persistence (LOCAL_RESULTS_DIR for dev)
-│   ├── scan.py                 # cross-ticker scan; sharded; --merge-index
-│   ├── streamlit_app.py        # (owned by frontend collaborator)
-│   └── config.py               # env / .env config
+│   ├── llm.py                  # OpenAI-compatible client; R1-aware JSON parsing
+│   ├── agents.py               # Bull / Bear / Risk personas
+│   ├── chair.py                # deterministic verifier + LLM-as-judge
+│   ├── orchestrator.py         # 3-round debate flow + verdict emit
+│   ├── scan.py                 # cross-ticker scan; sharded + merge-index
+│   └── storage.py              # local or Azure Blob persistence
+├── frontend/                   # Django frontend (UI templates + static assets)
+│   ├── manage.py               # Django entrypoint (dev server)
+│   ├── dashboard/              # Django app for the web UI
+│   └── templates/              # HTML templates
 ├── .github/workflows/
-│   └── nightly-scan.yml        # on-demand scan (workflow_dispatch only)
-├── .env.example                # configuration template
-├── requirements.txt
-├── requirements-maf.txt        # optional MAF deps
+│   └── nightly-scan.yml        # optional on-demand scan workflow
+├── .env.example                # configuration template (copy to .env)
+├── requirements.txt            # primary Python deps
+├── requirements-maf.txt        # optional MAF deps (separate install)
 └── README.md
 ```
 
@@ -151,6 +155,16 @@ pip install -r requirements.txt
 cp .env.example .env
 # then edit .env — see "Configuration" below
 ```
+
+### Run the Django frontend
+
+```bash
+source .venv/bin/activate
+python manage.py migrate
+python manage.py runserver
+```
+
+Open http://127.0.0.1:8000 and enter an NSE/BSE ticker. The page renders the debate verdict, the underlying snapshot, and the rejected-claim badges.
 
 ### Try it without any credentials (mock mode)
 

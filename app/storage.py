@@ -133,6 +133,35 @@ def _list(prefix: str) -> list[str]:
     return _blob_list(prefix)
 
 
+def to_persisted_payload(ticker: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Trim ``run_debate()`` output to the canonical per-ticker persistence shape.
+
+    Shared by the cross-stock scan and the single-debate UI flow so the
+    leaderboard sees identical fields regardless of how a verdict was produced.
+    """
+    from datetime import datetime, timezone
+
+    return {
+        "ticker": ticker.upper(),
+        "as_of": result.get("snapshot", {}).get("as_of", ""),
+        "snapshot": result.get("snapshot", {}),
+        "news": result.get("news", []),
+        "filings": result.get("filings", []),
+        "filings_metrics": result.get("filings_metrics", {}),
+        "arguments": result.get("arguments", {}),
+        "transcript": result.get("transcript", []),
+        "verdict": result.get("verdict", {}),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def today_date() -> str:
+    """YYYY-MM-DD in UTC — the date partition the leaderboard reads."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 def put_verdict(date: str, ticker: str, payload: dict[str, Any]) -> bool:
     """Write one ticker's full debate result for a given date."""
     return _put(f"verdicts/{date}/{ticker.upper()}.json", payload)

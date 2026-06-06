@@ -22,6 +22,9 @@ azure-storage-blob>=12.20.0
 # UI
 streamlit>=1.36
 
+# Django frontend (keep for the Django UI)
+Django>=5.0
+
 # Tests
 pytest>=8.0
 

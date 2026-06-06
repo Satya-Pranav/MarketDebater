@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+{% block title %}MarketDebater Swarm{% endblock %}
+{% block content %}
+
+{# Warning Banner #}
+<div class="warning-banner">
+  <div class="warning-text">⚠️ This product is only for educational purposes. Not financial advice.</div>
+</div>
+
+{# Full-screen loading overlay (shown while a debate is running) #}
+<div id="debate-loading" class="debate-loading" style="display:none;">
+  <div class="debate-loading-card">
+    <div class="debate-spinner"></div>
+    <div class="debate-loading-title">Running debate <span id="debate-loading-ticker"></span></div>
+    <div class="debate-loading-sub">Fetching prices, news and SEC filings · Three persona agents debating · Chair grading.</div>
+    <div class="debate-loading-timer" id="debate-loading-timer">0s</div>
+    <div class="debate-loading-hint">A 3-round debate on V4-Flash usually finishes in 30–90s. Rate-limit retries can extend that.</div>
+  </div>
+</div>
+
+{# Top nav #}
+<div class="top-nav">
+  <a class="top-nav-link {% if not submitted %}active{% endif %}" href="{% url 'home' %}">Single Debate</a>
+  <a class="top-nav-link" href="{% url 'leaderboard' %}">Daily Suggestions</a>
+</div>
+
+{# Landing: search form #}
+{% if not submitted %}
+  <div class="landing-container">
+    <div class="landing-content">
+      <div class="landing-header">
+        <div class="logo-badge">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 4 L44 40 L4 40 Z" stroke="#38bdf8" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
+        </div>
+        <h1 class="landing-title">MarketDebater Swarm</h1>
+        <p class="landing-subtitle">AI-powered debate on any US stock</p>
+      </div>
+
+      <form method="post" action="{% url 'run-debate' %}" class="search-form" id="debate-form" onsubmit="onDebateSubmit(event)">
+        {% csrf_token %}
+        <div class="search-box">
+          {{ form.ticker }}
+          <button type="submit" class="search-button" id="debate-submit">Debate</button>
+        </div>
+        <div class="search-options">
+          <label class="rounds-label" for="{{ form.rounds.id_for_label }}">Rounds:</label>
+          {{ form.rounds }}
+          <span class="rounds-hint">More rounds = deeper rebuttal, slower run.</span>
+        </div>
+        {% if error %}
+          <div class="search-error">{{ error }}</div>
+        {% endif %}
+      </form>
+
+      <div class="suggested-section">
+        <p class="suggested-label">Try these US stocks:</p>
+        <div class="ticker-chips">
+          {% for ticker in suggested_tickers %}
+            <button type="button" class="ticker-chip" onclick="selectTicker('{{ ticker }}')">{{ ticker }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+  </div>
+{% endif %}
+
+{# Results: show only when result exists #}
+{% if result %}
+  <div class="results-container">
+    <div class="results-header">
+      <button class="back-button" onclick="goHome()">+ New Debate</button>
+      {% if persisted_to_board %}
+        <a class="leaderboard-pill" href="{% url 'leaderboard' %}" title="This verdict was added to today's leaderboard">✓ Added to Daily Suggestions</a>
+      {% endif %}
+    </div>
+
+    <div class="panel snapshot-card">
+      <div class="snapshot-header">
+        <div class="snapshot-title">
+          <h2>{{ result.snapshot.company }} <span class="verdict-inline">{{ result.verdict.verdict }}</span></h2>
+          <span class="ticker-badge">{{ result.snapshot.ticker }}</span>
+        </div>
+        <div class="snapshot-price">
+          <div class="price-value">{% if result.snapshot.currency == 'USD' %}${% elif result.snapshot.currency == 'INR' %}₹{% elif result.snapshot.currency == 'EUR' %}€{% elif result.snapshot.currency == 'GBP' %}£{% else %}{{ result.snapshot.currency }} {% endif %}{{ result.snapshot.price }}</div>
+          <div class="price-change {% if result.snapshot.change_pct >= 0 %}positive{% else %}negative{% endif %}">
+            {{ result.snapshot.change_pct|floatformat:2 }}%
+          </div>
+        </div>
+      </div>
+      <p class="verdict-rationale" style="margin-top:1rem;">{{ result.verdict.rationale|safe }}</p>
+    </div>
+
+
+
+    <div class="grading-section">
+      <h3 class="section-title">Analyst Scores</h3>
+
+      <div class="grading-overview">
+        <div class="pie-charts-section">
+          <div class="pie-chart-container">
+            <h4>Total Weight</h4>
+            <svg viewBox="0 0 180 180" class="pie-chart-small">
+              <circle cx="90" cy="90" r="70" fill="none" stroke="rgba(148,163,184,0.1)" stroke-width="1"/>
+              <circle cx="90" cy="90" r="70" fill="none" stroke="#10b981" stroke-width="14" opacity="0.8"/>
+              <text x="90" y="88" text-anchor="middle" font-size="22" font-weight="700" fill="var(--accent)" id="weight-center">—</text>
+              <text x="90" y="108" text-anchor="middle" font-size="9" fill="var(--text-muted)">of 3.0 max</text>
+            </svg>
+          </div>
+        </div>
+
+        <div class="personas-row">
+          {% for persona, label in persona_labels.items %}
+            {% with grading=result.verdict.grounding_scores|get_item:persona %}
+              {% with weight=result.verdict.weights|get_item:persona %}
+                {% with confidence=result.arguments|get_item:persona|get_item:"confidence" %}
+                  <div class="persona-playcard"
+                       data-persona="{{ persona }}"
+                       data-confidence="{{ confidence|default:0 }}"
+                       data-grounding="{{ grading.grounding|default:0 }}"
+                       data-weight="{{ weight|default:0 }}">
+                    <div class="playcard-header">
+                      <div class="playcard-name">{{ label }}</div>
+                    </div>
+                    <div class="playcard-stats">
+                      <div class="stat-row">
+                        <span class="stat-label">Grounding</span>
+                        <span class="stat-value">{{ grading.grounding|default:0|floatformat:2 }}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Confidence</span>
+                        <span class="stat-value">{{ confidence|default:0|floatformat:2 }}</span>
+                      </div>
+                      <div class="stat-row">
+                        <span class="stat-label">Weight</span>
+                        <span class="stat-value">{{ weight|default:0|floatformat:3 }}</span>
+                      </div>
+                    </div>
+                  </div>
+                {% endwith %}
+              {% endwith %}
+            {% endwith %}
+          {% endfor %}
+        </div>
+      </div>
+      
+
+    </div>
+
+    <div class="updates-arguments-row">
+      <div class="panel updates-card updates-card-small">
+        <h4>Latest Updates <button onclick="refreshNewsOnly()" style="float:right;padding:0.3rem 0.6rem;font-size:1rem;background:transparent;color:var(--accent);border:none;border-radius:4px;cursor:pointer;" title="Refresh updates">↻</button></h4>
+        <div class="updates-body">
+          {% if result.news %}
+            <ul class="updates-list" id="news-list">
+              {% for n in result.news %}
+                <li class="update-item">
+                  <div class="update-time">{{ n|get_item:"published" }}</div>
+                  <div class="update-text">{{ n|get_item:"title" }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="updates-empty">No recent updates available.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="panel key-arguments-card">
+        <h4>Key Arguments</h4>
+        <div class="key-arguments-bullets">
+          {% for turn in result.transcript %}
+            {% with points_list=turn.argument.points|default:"" %}
+              {% if points_list %}
+                {% with first_point=points_list|first %}
+                  {% with claim_text=first_point|get_item:"claim"|default:"Analysis point" %}
+                    {% with persona_name=turn.argument.persona_name|default:turn.argument.persona %}
+                      {% with persona=turn.argument.persona %}
+                        {% if turn.argument.stance == 'positive' %}
+                          <div class="argument-bullet positive-bullet">
+                            <span class="bullet-marker">•</span>
+                            <span class="bullet-text">
+                              {% if persona == 'bull' %}
+                                <span class="persona-label bull-label">{{ persona_name }}</span>
+                              {% elif persona == 'bear' %}
+                                <span class="persona-label bear-label">{{ persona_name }}</span>
+                              {% else %}
+                                <span class="persona-label neutral-label">{{ persona_name }}</span>
+                              {% endif %}
+                              : {{ claim_text|truncatewords:10 }}
+                            </span>
+                          </div>
+                        {% elif turn.argument.stance == 'negative' %}
+                          <div class="argument-bullet negative-bullet">
+                            <span class="bullet-marker">•</span>
+                            <span class="bullet-text">
+                              {% if persona == 'bull' %}
+                                <span class="persona-label bull-label">{{ persona_name }}</span>
+                              {% elif persona == 'bear' %}
+                                <span class="persona-label bear-label">{{ persona_name }}</span>
+                              {% else %}
+                                <span class="persona-label neutral-label">{{ persona_name }}</span>
+                              {% endif %}
+                              : {{ claim_text|truncatewords:10 }}
+                            </span>
+                          </div>
+                        {% else %}
+                          <div class="argument-bullet neutral-bullet">
+                            <span class="bullet-marker">•</span>
+                            <span class="bullet-text">
+                              {% if persona == 'bull' %}
+                                <span class="persona-label bull-label">{{ persona_name }}</span>
+                              {% elif persona == 'bear' %}
+                                <span class="persona-label bear-label">{{ persona_name }}</span>
+                              {% else %}
+                                <span class="persona-label neutral-label">{{ persona_name }}</span>
+                              {% endif %}
+                              : {{ claim_text|truncatewords:10 }}
+                            </span>
+                          </div>
+                        {% endif %}
+                      {% endwith %}
+                    {% endwith %}
+                  {% endwith %}
+                {% endwith %}
+              {% endif %}
+            {% endwith %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {# ----- Persona deep-dive: collapsible playcard with 4 filter panels ----- #}
+    <details class="panel deep-dive-card" open>
+      <summary class="deep-dive-summary">
+        <span class="deep-dive-title">Persona Deep-dive</span>
+        <span class="deep-dive-meta">{{ result.debate_rounds }} round{{ result.debate_rounds|pluralize }} · each persona's claims, citations &amp; sources</span>
+        <span class="deep-dive-chevron" aria-hidden="true">▾</span>
+      </summary>
+      <div class="deep-dive-body">
+
+        {# Filter buttons live INSIDE the card so it's clear what they switch. #}
+        <div class="debate-filters">
+          <button class="filter-btn active" data-filter="all" onclick="switchDebateFilter('all')">Overall Analysis</button>
+          <button class="filter-btn" data-filter="bull" onclick="switchDebateFilter('bull')">PermaBull</button>
+          <button class="filter-btn" data-filter="bear" onclick="switchDebateFilter('bear')">PermaBear</button>
+          <button class="filter-btn" data-filter="neutral" onclick="switchDebateFilter('neutral')">RiskManager</button>
+        </div>
+
+        {% with debate_rounds=result.debate_rounds %}
+        {% with all_personas=persona_labels.items %}
+
+        {# ---- Filter: ALL ---- #}
+        <div id="filter-all" class="filter-content active">
+          {% for persona, label in all_personas %}
+            {% with args=arguments_by_persona|get_item:persona %}
+            <div class="persona-block persona-block-{{ persona }}">
+              <div class="persona-block-header">
+                <span class="persona-block-name persona-{{ persona }}">{{ label }}</span>
+                {% with last=args|last %}
+                  {% if last %}
+                    {% with stance_lc=last.stance|default:""|lower %}
+                      <span class="stance-pill stance-{% if stance_lc == 'buy' or stance_lc == 'positive' or stance_lc == 'strong buy' or stance_lc == 'accumulate' %}pos{% elif stance_lc == 'sell' or stance_lc == 'negative' or stance_lc == 'reduce' %}neg{% else %}neu{% endif %}">{{ last.stance|default:"—" }}</span>
+                    {% endwith %}
+                    <span class="meta-chip"><span class="meta-key">confidence</span> {{ last.confidence|default:0|floatformat:2 }}</span>
+                  {% endif %}
+                {% endwith %}
+              </div>
+              {% if args %}
+                {% for arg in args %}
+                  <div class="persona-round-block">
+                    <div class="persona-round-header">{{ arg.round|round_label:debate_rounds }}</div>
+                    {% for pt in arg.points %}
+                      <div class="claim-bullet">
+                        <div class="claim-text">{{ pt|get_item:"claim" }}</div>
+                        <div class="claim-meta">
+                          {% with cm=pt|get_item:"cited_metric" %}{% if cm %}<span class="claim-cite" title="Cited snapshot key=value">{{ cm }}</span>{% endif %}{% endwith %}
+                          {% with src=pt|get_item:"source" %}{% if src %}{% if src|starts_with:"http" %}<a class="claim-source claim-source-link" href="{{ src }}" target="_blank" rel="noopener">source ↗</a>{% else %}<span class="claim-source">{{ src }}</span>{% endif %}{% endif %}{% endwith %}
+                        </div>
+                      </div>
+                    {% empty %}
+                      <div class="claim-empty">No points recorded this round.</div>
+                    {% endfor %}
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="claim-empty">This persona did not produce arguments.</div>
+              {% endif %}
+            </div>
+            {% endwith %}
+          {% endfor %}
+        </div>
+
+        {# ---- Filter: per persona (bull / bear / neutral) ---- #}
+        {% for persona, label in all_personas %}
+          <div id="filter-{{ persona }}" class="filter-content">
+            {% with args=arguments_by_persona|get_item:persona %}
+            <div class="persona-block persona-block-{{ persona }}">
+              <div class="persona-block-header">
+                <span class="persona-block-name persona-{{ persona }}">{{ label }}</span>
+                {% with last=args|last %}
+                  {% if last %}
+                    {% with stance_lc=last.stance|default:""|lower %}
+                      <span class="stance-pill stance-{% if stance_lc == 'buy' or stance_lc == 'positive' or stance_lc == 'strong buy' or stance_lc == 'accumulate' %}pos{% elif stance_lc == 'sell' or stance_lc == 'negative' or stance_lc == 'reduce' %}neg{% else %}neu{% endif %}">final: {{ last.stance|default:"—" }}</span>
+                    {% endwith %}
+                    <span class="meta-chip"><span class="meta-key">final confidence</span> {{ last.confidence|default:0|floatformat:2 }}</span>
+                  {% endif %}
+                {% endwith %}
+              </div>
+              {% if args %}
+                {% for arg in args %}
+                  <div class="persona-round-block">
+                    <div class="persona-round-header">
+                      <span class="round-label-text">{{ arg.round|round_label:debate_rounds }}</span>
+                      {% with stance_lc=arg.stance|default:""|lower %}
+                        <span class="stance-pill stance-sm stance-{% if stance_lc == 'buy' or stance_lc == 'positive' or stance_lc == 'strong buy' or stance_lc == 'accumulate' %}pos{% elif stance_lc == 'sell' or stance_lc == 'negative' or stance_lc == 'reduce' %}neg{% else %}neu{% endif %}">{{ arg.stance|default:"—" }}</span>
+                      {% endwith %}
+                      <span class="meta-chip meta-chip-sm"><span class="meta-key">conf</span> {{ arg.confidence|default:0|floatformat:2 }}</span>
+                    </div>
+                    {% for pt in arg.points %}
+                      <div class="claim-bullet">
+                        <div class="claim-text">{{ pt|get_item:"claim" }}</div>
+                        <div class="claim-meta">
+                          {% with cm=pt|get_item:"cited_metric" %}{% if cm %}<span class="claim-cite" title="Cited snapshot key=value">{{ cm }}</span>{% endif %}{% endwith %}
+                          {% with src=pt|get_item:"source" %}{% if src %}{% if src|starts_with:"http" %}<a class="claim-source claim-source-link" href="{{ src }}" target="_blank" rel="noopener">source ↗</a>{% else %}<span class="claim-source">{{ src }}</span>{% endif %}{% endif %}{% endwith %}
+                        </div>
+                      </div>
+                    {% empty %}
+                      <div class="claim-empty">No points recorded this round.</div>
+                    {% endfor %}
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="claim-empty">No arguments from this persona.</div>
+              {% endif %}
+            </div>
+            {% endwith %}
+          </div>
+        {% endfor %}
+
+        {% endwith %}{% endwith %}
+      </div>
+    </details>
+
+    {# ----- Run timing transparency (collapsed by default) ----- #}
+    {% if result.timings %}
+      <details class="timing-details">
+        <summary>▸ Run timing breakdown · {{ result.timings.total|floatformat:1 }}s total</summary>
+        <div class="timing-body">
+          <p class="timing-hint">Where each phase of the debate spent wall-clock time. Persona calls are sequential today; data sub-fetches (prices/news/filings) run in parallel.</p>
+          {% with total=result.timings.total %}
+          <div class="timing-row">
+            <span class="timing-label">Data aggregation</span>
+            <div class="timing-bar-wrap"><div class="timing-bar" style="width: {{ result.timings.data|pct_of:total }};"></div></div>
+            <span class="timing-num">{{ result.timings.data|floatformat:1 }}s</span>
+            <span class="timing-pct">{{ result.timings.data|pct_of:total }}</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">PermaBull</span>
+            <div class="timing-bar-wrap"><div class="timing-bar timing-bar-bull" style="width: {{ result.timings.personas.bull|pct_of:total }};"></div></div>
+            <span class="timing-num">{{ result.timings.personas.bull|floatformat:1 }}s</span>
+            <span class="timing-pct">{{ result.timings.personas.bull|pct_of:total }}</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">PermaBear</span>
+            <div class="timing-bar-wrap"><div class="timing-bar timing-bar-bear" style="width: {{ result.timings.personas.bear|pct_of:total }};"></div></div>
+            <span class="timing-num">{{ result.timings.personas.bear|floatformat:1 }}s</span>
+            <span class="timing-pct">{{ result.timings.personas.bear|pct_of:total }}</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">RiskManager</span>
+            <div class="timing-bar-wrap"><div class="timing-bar timing-bar-neutral" style="width: {{ result.timings.personas.neutral|pct_of:total }};"></div></div>
+            <span class="timing-num">{{ result.timings.personas.neutral|floatformat:1 }}s</span>
+            <span class="timing-pct">{{ result.timings.personas.neutral|pct_of:total }}</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">Chair (judge)</span>
+            <div class="timing-bar-wrap"><div class="timing-bar timing-bar-chair" style="width: {{ result.timings.chair|pct_of:total }};"></div></div>
+            <span class="timing-num">{{ result.timings.chair|floatformat:1 }}s</span>
+            <span class="timing-pct">{{ result.timings.chair|pct_of:total }}</span>
+          </div>
+          {% endwith %}
+          <p class="timing-hint timing-hint-foot">Run on {{ result.timings.rounds }} round(s). LLM calls go through Azure AI Foundry / DeepSeek-V4-Flash.</p>
+        </div>
+      </details>
+    {% endif %}
+
+  </div>
+{% endif %}
+
+<div id="stats-modal" class="stats-modal" onclick="closeStatsModal()">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeStatsModal()">×</button>
+    <div class="modal-header"><div id="modal-icon" class="modal-icon"></div><h2 id="modal-title"></h2></div>
+    <div class="modal-stats"><div class="stat-row"><span class="stat-name">Grounding Score</span><span class="stat-val" id="modal-grounding"></span></div>
+    <div class="stat-row"><span class="stat-name">Confidence</span><span class="stat-val" id="modal-confidence"></span></div>
+    <div class="stat-row"><span class="stat-name">Final Weight</span><span class="stat-val" id="modal-weight"></span></div></div>
+  </div>
+</div>
+
+<div id="stats-tooltip" class="stats-tooltip" style="display:none;position:fixed;z-index:1200;pointer-events:none;">
+  <div class="tooltip-inner">
+    <div class="tt-name" style="font-weight:700;margin-bottom:6px;color:var(--text-primary)"></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Grounding:</span> <span class="tt-grounding" style="margin-left:6px;color:var(--accent);"></span></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Confidence:</span> <span class="tt-confidence" style="margin-left:6px;color:var(--accent);"></span></div>
+    <div class="tt-row"><span style="color:var(--text-muted)">Weight:</span> <span class="tt-weight" style="margin-left:6px;color:var(--accent);"></span></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const tooltip=document.getElementById('stats-tooltip');
+  const weights=[];
+  document.querySelectorAll('.persona-playcard').forEach(card=>{
+    const persona=card.dataset.persona||'';
+    const conf=card.dataset.confidence||0;
+    const ground=card.dataset.grounding||0;
+    const weight=card.dataset.weight||0;
+    weights.push(parseFloat(weight)||0);
+    const scoreEl=card.querySelector('.score-value');
+    if(scoreEl){
+      scoreEl.addEventListener('mouseenter', function(e){
+        tooltip.style.display='block';
+        tooltip.querySelector('.tt-name').textContent=persona;
+        tooltip.querySelector('.tt-grounding').textContent=parseFloat(ground).toFixed(2);
+        tooltip.querySelector('.tt-confidence').textContent=parseFloat(conf).toFixed(2);
+        tooltip.querySelector('.tt-weight').textContent=parseFloat(weight).toFixed(3);
+      });
+      scoreEl.addEventListener('mousemove', function(e){
+        const x=e.clientX+12; const y=e.clientY+12; tooltip.style.left=x+'px'; tooltip.style.top=y+'px';
+      });
+      scoreEl.addEventListener('mouseleave', function(){ tooltip.style.display='none'; });
+    }
+  });
+  if(weights.length>0){
+    const totalWeight=weights.reduce((a,b)=>a+b,0).toFixed(2);
+    const centerText=document.getElementById('weight-center');
+    if(centerText)centerText.textContent=totalWeight;
+  }
+});
+
+function goHome(){window.location.href='/';}
+function selectTicker(t){const f=document.querySelector('.search-form');if(f){const i=f.querySelector('input[name="ticker"]');if(i)i.value=t;showDebateLoading(t);f.submit();}}
+
+function showDebateLoading(ticker){
+  const overlay=document.getElementById('debate-loading');
+  const tickerEl=document.getElementById('debate-loading-ticker');
+  const timerEl=document.getElementById('debate-loading-timer');
+  if(!overlay) return;
+  if(tickerEl) tickerEl.textContent = ticker ? 'on ' + ticker : '';
+  overlay.style.display='flex';
+  const start=Date.now();
+  const tick=()=>{ if(overlay.style.display==='none') return; const s=Math.floor((Date.now()-start)/1000); if(timerEl) timerEl.textContent=s+'s'; };
+  if(window.__debateTimer) clearInterval(window.__debateTimer);
+  window.__debateTimer=setInterval(tick,1000);
+  const submitBtn=document.getElementById('debate-submit');
+  if(submitBtn){submitBtn.disabled=true; submitBtn.textContent='Running...';}
+}
+
+function onDebateSubmit(e){
+  const f=e.currentTarget;
+  const input=f.querySelector('input[name="ticker"]');
+  showDebateLoading(input ? input.value.trim().toUpperCase() : '');
+  // allow native submit to proceed
+}
+function switchDebateFilter(filter){document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));const b=document.querySelector(`[data-filter="${filter}"]`);if(b)b.classList.add('active');document.querySelectorAll('.filter-content').forEach(c=>c.classList.remove('active'));const el=document.getElementById(`filter-${filter}`);if(el)el.classList.add('active');}
+function toggleTranscript(persona){const content=document.getElementById(`transcript-${persona}`);if(!content)return;content.style.display=(content.style.display==='none'||content.style.display==='')?'block':'none';}
+function showStatsModal(persona,confidence,grounding,weight){const modal=document.getElementById('stats-modal');document.getElementById('modal-title').textContent=persona;document.getElementById('modal-grounding').textContent=(grounding||0).toFixed(2);document.getElementById('modal-confidence').textContent=(confidence||0).toFixed(2);document.getElementById('modal-weight').textContent=(weight||0).toFixed(3);modal.classList.add('active');}
+function closeStatsModal(){document.getElementById('stats-modal').classList.remove('active');}
+
+function refreshNewsOnly(){
+  const ticker='{{ result.snapshot.ticker|default:"" }}';
+  if(!ticker) return;
+  fetch(`/api/news/?ticker=${ticker}`).then(r=>r.json()).then(data=>{
+    const newsList=document.getElementById('news-list');
+    if(data.news && Array.isArray(data.news)){
+      let html='';
+      data.news.forEach(n=>{
+        const published=n.published||n.published_at||n.time||'';
+        const title=n.title||n.headline||n.summary||n.text||'No title';
+        html+=`<li class="update-item"><div class="update-time">${published}</div><div class="update-text">${title}</div></li>`;
+      });
+      newsList.innerHTML=html;
+    }
+  }).catch(err=>console.error('Error refreshing news:',err));
+}
+</script>
+
+{% endblock %}
