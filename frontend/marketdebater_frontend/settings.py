@@ -92,6 +92,13 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Tell WhiteNoise to serve directly via Django's static-file finders, so static
+# assets work even when `collectstatic` hasn't populated STATIC_ROOT yet (e.g.
+# on platforms where the release phase doesn't share a filesystem with the web
+# process). Slightly slower than serving from a pre-collected dir, but for a
+# demo it's the difference between "site renders styled" and "raw HTML on
+# white background". Safe to keep on in prod for small projects.
+WHITENOISE_USE_FINDERS = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Production security settings.
