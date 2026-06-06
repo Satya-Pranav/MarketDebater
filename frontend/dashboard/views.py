@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from django.shortcuts import render
@@ -29,6 +30,15 @@ SUGGESTED_TICKERS = [
     "HDFCBANK.NS",
     "ICICIBANK.NS",
 ]
+
+
+def clean_rationale(text):
+    """Remove [MOCK] prefix from rationale text."""
+    if not text:
+        return text
+    # Remove [MOCK] prefix and any trailing spaces
+    cleaned = re.sub(r'^\s*\[MOCK\]\s*', '', text)
+    return cleaned
 
 
 def home(request):
@@ -83,6 +93,10 @@ def run_debate_view(request):
             elapsed = time.time() - start
             logger.info(f"run_debate completed in {elapsed:.2f}s")
             
+            # Clean rationale to remove [MOCK] prefix
+            if result and result.get("verdict") and result["verdict"].get("rationale"):
+                result["verdict"]["rationale"] = clean_rationale(result["verdict"]["rationale"])
+            
             grounding_scores = result.get("verdict", {}).get("grounding_scores", {})
             disclaimer = result.get("verdict", {}).get("disclaimer")
             rejected_claims = [
@@ -101,6 +115,10 @@ def run_debate_view(request):
         error = "Select a valid company ticker."
 
     logger.info(f"Rendering with error: {error}, result: {result is not None}")
+    if result:
+        logger.info(f"Result news count: {len(result.get('news', []))}")
+        if result.get('news'):
+            logger.info(f"First news item: {result['news'][0]}")
     
     return render(
         request,
