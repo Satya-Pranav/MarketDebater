@@ -2443,3 +2443,31 @@ body {
   border-top-color: var(--bg-secondary);
   filter: drop-shadow(0 1px 0 rgba(148, 163, 184, 0.12));
 }
+
+/* -------------------- Debate-failed error card -------------------- */
+.debate-error-card {
+  padding: 1.5rem 1.75rem;
+  border-left: 4px solid var(--danger);
+  margin-top: 1rem;
+}
+.debate-error-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: 0.5rem;
+}
+.debate-error-msg {
+  color: var(--text-primary);
+  margin-bottom: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88rem;
+  background: rgba(239, 68, 68, 0.06);
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  word-break: break-word;
+}
+.debate-error-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}

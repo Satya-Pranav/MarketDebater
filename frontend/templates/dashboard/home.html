@@ -15,7 +15,7 @@
     <div class="debate-loading-title">Running debate <span id="debate-loading-ticker"></span></div>
     <div class="debate-loading-sub">Fetching prices, news and SEC filings · Three persona agents debating · Chair grading.</div>
     <div class="debate-loading-timer" id="debate-loading-timer">0s</div>
-    <div class="debate-loading-hint">A 3-round debate on V4-Flash usually finishes in 30–90s. Rate-limit retries can extend that.</div>
+    <div class="debate-loading-hint">A 3-round debate on V4-Flash usually finishes in 60–120s. Maximum of 300s (5 minutes) before the hosting platform times out. Rate-limit retries can extend it within that window.</div>
   </div>
 </div>
 
@@ -62,6 +62,25 @@
         </div>
       </div>
 
+    </div>
+  </div>
+{% endif %}
+
+{# Debate-failed state: submitted but no result and no landing form is shown.
+   Without this block the page would render blank — confusing for the user. #}
+{% if submitted and not result and error %}
+  <div class="results-container">
+    <div class="results-header">
+      <button class="back-button" onclick="goHome()">+ New Debate</button>
+    </div>
+    <div class="panel debate-error-card">
+      <div class="debate-error-title">⚠ Debate failed</div>
+      <div class="debate-error-msg">{{ error }}</div>
+      <div class="debate-error-hint">
+        Common causes: Foundry rate limit (try again in a minute), missing news/filings for the ticker,
+        or the request hit the hosting platform's ~5-minute timeout. Drop to 1 round and retry, or pick a
+        different ticker.
+      </div>
     </div>
   </div>
 {% endif %}
