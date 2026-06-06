@@ -16,7 +16,7 @@ from app import config, storage
 from app.orchestrator import run_debate
 from app.scan import scan_universe
 
-from .forms import TickerForm
+from .forms import MAX_SCAN_TICKERS, TICKER_REGEX, TickerForm
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,30 @@ def run_scan_view(request):
     which handles per-ticker failures + index rebuild.
     """
     raw = (request.POST.get("tickers") or "").strip()
-    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()] or list(SUGGESTED_TICKERS)
+    submitted = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    tickers = submitted or list(SUGGESTED_TICKERS)
+
+    # Validate each ticker against the same regex the single-debate form uses,
+    # and cap the count. Without this, a malicious POST could (a) inject path
+    # segments — ticker values flow into f"verdicts/<date>/<ticker>.json" — and
+    # (b) tie up the server for hours by submitting hundreds of tickers.
+    invalid = [t for t in tickers if not TICKER_REGEX.fullmatch(t)]
+    if invalid:
+        messages.error(
+            request,
+            "Invalid ticker(s): " + ", ".join(invalid[:5])
+            + (" ..." if len(invalid) > 5 else "")
+            + ". Use US symbols like AAPL or MSFT.",
+        )
+        return HttpResponseRedirect(reverse("leaderboard"))
+    if len(tickers) > MAX_SCAN_TICKERS:
+        messages.error(
+            request,
+            f"Too many tickers ({len(tickers)}); the in-browser scan is capped at "
+            f"{MAX_SCAN_TICKERS}. Run `python -m app.scan` from the CLI for larger universes.",
+        )
+        return HttpResponseRedirect(reverse("leaderboard"))
+
     try:
         rounds = int(request.POST.get("rounds") or 1)
     except ValueError:

@@ -15,6 +15,11 @@ ROUND_CHOICES = [
     (5, "5 rounds"),
 ]
 
+# Single source of truth for ticker shape — reused by the form and by the
+# scan-now POST handler. Anchored fullmatch elsewhere.
+TICKER_REGEX = re.compile(r"[A-Z0-9]{1,10}(\.[A-Z]{1,2})?")
+MAX_SCAN_TICKERS = 25  # cap to prevent quota / runtime abuse from the scan POST
+
 
 class TickerForm(forms.Form):
     """Form for submitting a stock ticker symbol."""
@@ -50,7 +55,7 @@ class TickerForm(forms.Form):
         # Accept US-style plain tickers (AAPL, GOOGL, BRK.B) and the legacy NSE/BSE
         # suffix shape (RELIANCE.NS) — the backend pivoted to US but the regex
         # stays permissive so old bookmarks don't 400.
-        if not re.fullmatch(r"[A-Z0-9]{1,10}(\.[A-Z]{1,2})?", ticker):
+        if not TICKER_REGEX.fullmatch(ticker):
             raise forms.ValidationError(
                 "Invalid ticker format. Use a US symbol like AAPL or MSFT."
             )
