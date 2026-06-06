@@ -102,6 +102,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # header it set is also deprecated by modern browsers (Chrome dropped it in 2019).
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
+    # Railway / Heroku / Render / most PaaS terminate TLS at the edge and proxy
+    # plain HTTP to gunicorn with X-Forwarded-Proto set. Without this, Django
+    # treats every request as HTTP and the SECURE_SSL_REDIRECT above triggers
+    # an infinite redirect loop with the edge proxy.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_HSTS_SECONDS", "3600"))
