@@ -169,8 +169,7 @@ MarketDebater/
 │   └── templates/dashboard/    # home.html, leaderboard.html, base.html
 ├── manage.py                   # repo-root Django entrypoint
 ├── Procfile                    # Railway: release (migrate + collectstatic) + web (gunicorn)
-├── make_deck.py                # ReportLab script that generates the submission PDF
-├── MarketDebaters_Deck.pdf     # 10-slide submission deck (run make_deck.py to regenerate)
+├── MarketDebaters_Deck.pdf     # 10-slide submission deck
 ├── .github/workflows/
 │   └── nightly-scan.yml        # workflow_dispatch-only scan
 ├── .env.example                # configuration template
@@ -385,18 +384,6 @@ ls ./out/verdicts/$(date -u +%F)/                # 3 per-ticker JSONs + index.js
 ```
 
 **The anti-hallucination property is the headline correctness check.** Cite `revenue=999_999_999_999` for a stock whose snapshot says otherwise, and `verify_grounding()` flags the claim, lists it under `unverified_metrics`, and the Chair penalizes the persona's weight. This works equally for technicals (`rsi_14`, `sma_50`, …) and filings-derived metrics (`revenue`, `eps_diluted`, `gross_margin`, `debt_to_equity`).
-
----
-
-## Generate the submission deck
-
-```bash
-pip install reportlab
-python make_deck.py
-# → writes MarketDebaters_Deck.pdf (10 slides, landscape, ~25 KB)
-```
-
-The script uses pure ReportLab (no system dependencies, no LaTeX) and produces vector PDFs that scale cleanly. Tweak slide content directly in `make_deck.py` — each slide is its own function.
 
 ---
 
