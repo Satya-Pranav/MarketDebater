@@ -40,7 +40,7 @@ class TickerForm(forms.Form):
         label="Debate rounds",
         choices=ROUND_CHOICES,
         coerce=int,
-        initial=3,
+        initial=2,
         required=False,
         widget=forms.Select(attrs={"class": "rounds-select"}),
     )
