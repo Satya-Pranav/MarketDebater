@@ -74,7 +74,7 @@ DEFAULT_TICKERS = [
 ]
 
 # ----- App behaviour -----
-DEBATE_ROUNDS = int(os.getenv("DEBATE_ROUNDS", "3"))
+DEBATE_ROUNDS = int(os.getenv("DEBATE_ROUNDS", "2"))
 MOCK_MODE = _flag("MOCK_MODE", "0")
 MAX_AGENT_TURNS = int(os.getenv("MAX_AGENT_TURNS", "12"))
 # Run the debate through Microsoft Agent Framework agents (needs `agent-framework`,

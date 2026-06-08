@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Iterator
 
 from . import config, search_client
@@ -78,20 +79,40 @@ def stream_debate(ticker: str, rounds: int | None = None) -> Iterator[dict[str, 
             if rnd > 1
             else None
         )
+        # Personas in a single round are independent — they only read the PREVIOUS
+        # round's `opponents` snapshot, never each other's current-round output.
+        # Running them in parallel turns round wall time from ~3× call-latency
+        # (serial) into ~1× call-latency, which is the biggest single win against
+        # Railway's 300s edge timeout.
+        round_args: dict[str, dict] = {}
+        t_starts: dict[str, float] = {}
+        with ThreadPoolExecutor(max_workers=len(PERSONA_ORDER)) as pool:
+            future_to_persona: dict = {}
+            for persona in PERSONA_ORDER:
+                others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
+                t_starts[persona] = time.perf_counter()
+                fut = pool.submit(
+                    run_persona,
+                    persona,
+                    snapshot,
+                    news,
+                    opponents=others,
+                    filings=filings,
+                    round_num=rnd,
+                    final_round=(rnd == rounds and rounds > 1),
+                )
+                future_to_persona[fut] = persona
+            for fut in as_completed(future_to_persona):
+                persona = future_to_persona[fut]
+                arg = fut.result()
+                persona_times[persona] += time.perf_counter() - t_starts[persona]
+                arg["round"] = rnd
+                round_args[persona] = arg
+
+        # Yield in a stable PERSONA_ORDER so the transcript always reads
+        # bull → bear → neutral regardless of which future finished first.
         for persona in PERSONA_ORDER:
-            others = {p: v for p, v in (opponents or {}).items() if p != persona} or None
-            t_p0 = time.perf_counter()
-            arg = run_persona(
-                persona,
-                snapshot,
-                news,
-                opponents=others,
-                filings=filings,
-                round_num=rnd,
-                final_round=(rnd == rounds and rounds > 1),
-            )
-            persona_times[persona] += time.perf_counter() - t_p0
-            arg["round"] = rnd
+            arg = round_args[persona]
             latest[persona] = arg
             yield {"type": "argument", "round": rnd, "persona": persona, "argument": arg}
 
