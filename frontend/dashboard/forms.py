@@ -18,7 +18,13 @@ ROUND_CHOICES = [
 # Single source of truth for ticker shape — reused by the form and by the
 # scan-now POST handler. Anchored fullmatch elsewhere.
 TICKER_REGEX = re.compile(r"[A-Z0-9]{1,10}(\.[A-Z]{1,2})?")
-MAX_SCAN_TICKERS = 25  # cap to prevent quota / runtime abuse from the scan POST
+# Cap the in-browser scan at 3. Three parallel debates is the empirical sweet
+# spot on free-tier Azure DeepSeek before rate-limit retries eat the wall-time
+# win, and a 3-stock leaderboard is plenty for a demo. Larger universes belong
+# to the CLI scan (`python -m app.scan`).
+MAX_SCAN_TICKERS = 3
+# Number of debates run concurrently inside the scan loop.
+SCAN_CONCURRENCY = 3
 
 
 class TickerForm(forms.Form):
@@ -31,8 +37,13 @@ class TickerForm(forms.Form):
         widget=forms.TextInput(
             attrs={
                 "class": "ticker-input",
-                "placeholder": "e.g. AAPL",
-                "autocomplete": "off",
+                "placeholder": "Pick or type a ticker (e.g. AAPL)",
+                # `list=` binds the input to the <datalist id="ticker-options">
+                # rendered by the home template. Gives us a native dropdown +
+                # filter-as-you-type with zero JS and proper mobile pickers.
+                # `autocomplete=off` would suppress the dropdown on some
+                # browsers, so we leave it on.
+                "list": "ticker-options",
             }
         ),
     )

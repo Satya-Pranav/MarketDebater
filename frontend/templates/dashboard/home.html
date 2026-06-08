@@ -37,12 +37,20 @@
         <p class="landing-subtitle">AI-powered debate on any US stock</p>
       </div>
 
-      <form method="post" action="{% url 'run-debate' %}" class="search-form" id="debate-form" onsubmit="onDebateSubmit(event)">
+      <form method="post" action="{% url 'debate-start' %}" class="search-form" id="debate-form" onsubmit="onDebateSubmit(event)">
         {% csrf_token %}
         <div class="search-box">
           {{ form.ticker }}
           <button type="submit" class="search-button" id="debate-submit">Debate</button>
         </div>
+        {# Native combobox: <input list> + <datalist> = filter-as-you-type dropdown,
+           zero JS, proper mobile pickers. Curated to the 25-ticker watchlist;
+           power users can still type any valid ticker. #}
+        <datalist id="ticker-options">
+          {% for value, label in ticker_options %}
+            <option value="{{ value }}" label="{{ label }}"></option>
+          {% endfor %}
+        </datalist>
         <div class="search-options">
           <label class="rounds-label" for="{{ form.rounds.id_for_label }}">Rounds:</label>
           {{ form.rounds }}
