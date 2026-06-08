@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
@@ -45,6 +47,36 @@ def _select_tickers(args: argparse.Namespace) -> list[str]:
 _to_persisted_payload = storage.to_persisted_payload  # backwards-compat alias
 
 
+def _run_one(ticker: str, rounds: int | None, date: str) -> dict[str, Any]:
+    """Run one debate, write its verdict, and return a per-ticker timing record.
+
+    Pulled out as a top-level function so ThreadPoolExecutor can submit it for
+    the concurrent-scan path. Catches exceptions per-ticker — one bad symbol
+    shouldn't kill a scan of many.
+    """
+    t0 = time.perf_counter()
+    try:
+        result = run_debate(ticker, rounds=rounds)
+        storage.put_verdict(date, ticker, _to_persisted_payload(ticker, result))
+        v = result.get("verdict", {})
+        return {
+            "ticker": ticker,
+            "elapsed": round(time.perf_counter() - t0, 2),
+            "verdict": v.get("verdict"),
+            "net_bull_score": v.get("net_bull_score"),
+            "error": None,
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {
+            "ticker": ticker,
+            "elapsed": round(time.perf_counter() - t0, 2),
+            "verdict": None,
+            "net_bull_score": None,
+            "error": str(e),
+        }
+
+
 def scan_universe(
     date: str | None = None,
     shard: int | None = None,
@@ -52,51 +84,84 @@ def scan_universe(
     tickers: list[str] | None = None,
     write_index: bool = True,
     rounds: int | None = None,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     """Run debates over the (optionally sharded) universe and persist results.
 
     ``rounds`` overrides config.DEBATE_ROUNDS for each debate (useful for the
     UI "Run scan" button, which defaults to a 1-round fast scan).
+    ``concurrency`` runs that many debates in parallel via ThreadPoolExecutor.
+    Default 1 = serial (preserves existing behavior); the UI passes 3, which
+    is the empirical sweet spot before Azure rate-limit retries eat the gains.
 
-    Returns the merged index payload (or just per-ticker counts when ``write_index=False``).
+    Returns a dict with: ``date``, ``ok``, ``fail`` (list of failed tickers),
+    ``timings`` (per-ticker {ticker, elapsed, verdict, net_bull_score, error}),
+    ``wall_time`` (total seconds), ``ranked`` (the merged leaderboard rows when
+    written, else []).
     """
     date = date or _today()
     ns = argparse.Namespace(
         tickers=",".join(tickers) if tickers else "", shard=shard, shards=shards
     )
     targets = _select_tickers(ns)
-    print(f"[scan] date={date}  shard={shard}/{shards}  tickers={len(targets)}  rounds={rounds or 'default'}")
+    print(
+        f"[scan] date={date}  shard={shard}/{shards}  tickers={len(targets)}  "
+        f"rounds={rounds or 'default'}  concurrency={concurrency}"
+    )
 
-    failures: list[str] = []
-    for i, ticker in enumerate(targets, 1):
-        print(f"[scan] ({i}/{len(targets)}) {ticker} ...", flush=True)
-        try:
-            result = run_debate(ticker, rounds=rounds)
-            storage.put_verdict(date, ticker, _to_persisted_payload(ticker, result))
-            v = result.get("verdict", {})
-            print(
-                f"[scan]   -> {v.get('verdict','?')}  "
-                f"net={v.get('net_bull_score','?')}",
-                flush=True,
-            )
-        except Exception as e:  # one bad ticker shouldn't kill the scan
-            failures.append(ticker)
-            print(f"[scan]   FAIL {ticker}: {e}", flush=True)
-            traceback.print_exc()
+    t_total0 = time.perf_counter()
+    timings: list[dict[str, Any]] = []
+    if concurrency > 1 and len(targets) > 1:
+        max_workers = min(concurrency, len(targets))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_run_one, t, rounds, date): t for t in targets}
+            for fut in as_completed(futures):
+                rec = fut.result()
+                timings.append(rec)
+                if rec["error"]:
+                    print(f"[scan]   FAIL {rec['ticker']}: {rec['error']}", flush=True)
+                else:
+                    print(
+                        f"[scan]   {rec['ticker']} -> {rec['verdict']} "
+                        f"net={rec['net_bull_score']} in {rec['elapsed']}s",
+                        flush=True,
+                    )
+    else:
+        for i, ticker in enumerate(targets, 1):
+            print(f"[scan] ({i}/{len(targets)}) {ticker} ...", flush=True)
+            rec = _run_one(ticker, rounds, date)
+            timings.append(rec)
+            if rec["error"]:
+                print(f"[scan]   FAIL {ticker}: {rec['error']}", flush=True)
+            else:
+                print(
+                    f"[scan]   -> {rec['verdict']}  net={rec['net_bull_score']} in {rec['elapsed']}s",
+                    flush=True,
+                )
 
-    print(f"[scan] done. ok={len(targets) - len(failures)} fail={len(failures)}")
+    wall_time = round(time.perf_counter() - t_total0, 2)
+    failures = [r["ticker"] for r in timings if r["error"]]
+    ok = len(timings) - len(failures)
+    print(f"[scan] done. ok={ok} fail={len(failures)} wall={wall_time}s")
     if failures:
         print(f"[scan] failed tickers: {failures}")
 
-    if write_index:
-        # When sharded, each shard writing the index would race. The CI workflow
-        # has a separate `merge` job that calls --merge-index after all shards
-        # finish. So only write the index here when running unsharded.
-        if shards in (None, 1):
-            payload = storage.write_merged_index(date)
-            print(f"[scan] index.json has {len(payload['ranked'])} ranked entries")
-            return payload
-    return {"date": date, "ok": len(targets) - len(failures), "fail": failures}
+    ranked: list[dict[str, Any]] = []
+    if write_index and shards in (None, 1):
+        # Sharded runs would race on index.json; the CI workflow's merge job
+        # handles that case with --merge-index after all shards finish.
+        idx_payload = storage.write_merged_index(date)
+        ranked = idx_payload.get("ranked", []) or []
+        print(f"[scan] index.json has {len(ranked)} ranked entries")
+
+    return {
+        "date": date,
+        "ok": ok,
+        "fail": failures,
+        "timings": timings,
+        "wall_time": wall_time,
+        "ranked": ranked,
+    }
 
 
 def _main(argv: list[str] | None = None) -> int:

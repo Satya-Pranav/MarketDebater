@@ -22,8 +22,8 @@ from app import config, storage
 from app.orchestrator import run_debate, stream_debate
 from app.scan import scan_universe
 
-from .companies import ticker_options
-from .forms import MAX_SCAN_TICKERS, TICKER_REGEX, TickerForm
+from .companies import COMPANIES, ticker_options
+from .forms import MAX_SCAN_TICKERS, SCAN_CONCURRENCY, TICKER_REGEX, TickerForm
 from .jobs import DebateJob, create_job, get_job
 
 logger = logging.getLogger(__name__)
@@ -374,6 +374,13 @@ def leaderboard_view(request):
     actual_date = (payload or {}).get("date", "") if payload else ""
     generated_at = (payload or {}).get("generated_at", "") if payload else ""
 
+    # Default selection for the scan multi-select: first 3 suggested tickers.
+    default_selected = set(SUGGESTED_TICKERS[:MAX_SCAN_TICKERS])
+    scan_ticker_options = [
+        {"value": t, "label": f"{t} — {COMPANIES.get(t, t)}", "default": t in default_selected}
+        for t in sorted(COMPANIES.keys())
+    ]
+
     return render(
         request,
         "dashboard/leaderboard.html",
@@ -386,7 +393,10 @@ def leaderboard_view(request):
             "storage_configured": storage_configured,
             "storage_hint": storage_hint,
             "persona_labels": PERSONA_LABELS,
-            "default_scan_tickers": ",".join(SUGGESTED_TICKERS),
+            "default_scan_tickers": ",".join(sorted(default_selected)),
+            "scan_ticker_options": scan_ticker_options,
+            "scan_max_tickers": MAX_SCAN_TICKERS,
+            "scan_concurrency": SCAN_CONCURRENCY,
         },
     )
 
@@ -429,16 +439,31 @@ def run_scan_view(request):
         )
         return HttpResponseRedirect(reverse("leaderboard"))
 
-    start = time.time()
-    logger.info(f"Triggering inline scan: tickers={tickers} rounds={rounds}")
+    logger.info(
+        f"Triggering inline scan: tickers={tickers} rounds={rounds} concurrency={SCAN_CONCURRENCY}"
+    )
     try:
-        payload = scan_universe(tickers=tickers, rounds=rounds)
-        elapsed = time.time() - start
-        ok = len(payload.get("ranked", []))
-        messages.success(
-            request,
-            f"Scan complete in {elapsed:.1f}s — {ok} ticker(s) ranked at {rounds} round(s).",
+        payload = scan_universe(tickers=tickers, rounds=rounds, concurrency=SCAN_CONCURRENCY)
+        wall = payload.get("wall_time", 0.0)
+        ok_count = payload.get("ok", 0)
+        failures = payload.get("fail", []) or []
+        per_ticker = " · ".join(
+            f"{t['ticker']} {t['elapsed']:.0f}s"
+            + ("✗" if t.get("error") else "")
+            for t in payload.get("timings", [])
         )
+        # Show: total wall time, ok/total count, parallelism, and per-ticker breakdown
+        # so the user can see the speedup from running them concurrently.
+        summary = (
+            f"Scan complete in {wall:.1f}s — {ok_count}/{len(tickers)} ranked "
+            f"at {rounds} round(s), {min(SCAN_CONCURRENCY, len(tickers))} in parallel. "
+            f"Per ticker: {per_ticker}."
+        )
+        if failures:
+            summary += f" Failed: {', '.join(failures)}."
+            messages.warning(request, summary)
+        else:
+            messages.success(request, summary)
     except Exception as exc:
         logger.exception(f"Scan failed: {exc}")
         messages.error(request, f"Scan failed: {exc}")
