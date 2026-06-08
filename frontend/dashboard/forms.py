@@ -31,8 +31,13 @@ class TickerForm(forms.Form):
         widget=forms.TextInput(
             attrs={
                 "class": "ticker-input",
-                "placeholder": "e.g. AAPL",
-                "autocomplete": "off",
+                "placeholder": "Pick or type a ticker (e.g. AAPL)",
+                # `list=` binds the input to the <datalist id="ticker-options">
+                # rendered by the home template. Gives us a native dropdown +
+                # filter-as-you-type with zero JS and proper mobile pickers.
+                # `autocomplete=off` would suppress the dropdown on some
+                # browsers, so we leave it on.
+                "list": "ticker-options",
             }
         ),
     )

@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}Debate · {{ ticker }} · MarketDebater{% endblock %}
+{% block content %}
+
+<div class="warning-banner">
+  <div class="warning-text">⚠️ This product is only for educational purposes. Not financial advice.</div>
+</div>
+
+<div class="top-nav">
+  <a class="top-nav-link active" href="{% url 'home' %}">Single Debate</a>
+  <a class="top-nav-link" href="{% url 'leaderboard' %}">Daily Suggestions</a>
+</div>
+
+<div class="results-container">
+  <div class="results-header">
+    <button class="back-button" onclick="window.location.href='/'">+ New Debate</button>
+    <div class="live-status">
+      <span class="live-dot" id="live-dot"></span>
+      <span id="live-status-text">Connecting…</span>
+      <span class="live-timer" id="live-timer">0s</span>
+    </div>
+  </div>
+
+  <div class="panel snapshot-card">
+    <div class="snapshot-header">
+      <div class="snapshot-title">
+        <h2 id="company-name">Loading {{ ticker }}…</h2>
+        <span class="ticker-badge">{{ ticker }}</span>
+      </div>
+      <div class="snapshot-price">
+        <div class="price-value" id="price-value">—</div>
+        <div class="price-change" id="price-change">—</div>
+      </div>
+    </div>
+    <p id="snapshot-hint" style="margin-top:1rem;color:var(--text-muted);">
+      Fetching prices, news and SEC filings…
+    </p>
+  </div>
+
+  <div class="grading-section">
+    <h3 class="section-title">Live Debate · {{ rounds }} round{{ rounds|pluralize }}</h3>
+
+    <div class="personas-row">
+      <div class="persona-playcard live-persona" data-persona="bull">
+        <div class="playcard-header">
+          <div class="playcard-name">PermaBull</div>
+          <span class="persona-status" data-persona-status="bull">waiting</span>
+        </div>
+        <div class="persona-live-body" data-persona-body="bull">
+          <div class="claim-empty">Waiting for opening case…</div>
+        </div>
+      </div>
+      <div class="persona-playcard live-persona" data-persona="bear">
+        <div class="playcard-header">
+          <div class="playcard-name">PermaBear</div>
+          <span class="persona-status" data-persona-status="bear">waiting</span>
+        </div>
+        <div class="persona-live-body" data-persona-body="bear">
+          <div class="claim-empty">Waiting for opening case…</div>
+        </div>
+      </div>
+      <div class="persona-playcard live-persona" data-persona="neutral">
+        <div class="playcard-header">
+          <div class="playcard-name">RiskManager</div>
+          <span class="persona-status" data-persona-status="neutral">waiting</span>
+        </div>
+        <div class="persona-live-body" data-persona-body="neutral">
+          <div class="claim-empty">Waiting for opening case…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details class="panel" open>
+    <summary style="cursor:pointer;font-weight:600;">Event stream</summary>
+    <div id="event-log" class="event-log"></div>
+  </details>
+
+  <div class="panel debate-error-card" id="error-card" style="display:none;">
+    <div class="debate-error-title">⚠ Debate failed</div>
+    <div class="debate-error-msg" id="error-msg"></div>
+    <div class="debate-error-hint">
+      Drop to 1 round and retry, or pick a different ticker.
+    </div>
+  </div>
+</div>
+
+<style>
+  .live-status{display:inline-flex;align-items:center;gap:0.6rem;padding:0.4rem 0.8rem;border-radius:999px;background:rgba(56,189,248,0.08);font-size:0.85rem;}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;animation:live-pulse 1.6s infinite;}
+  .live-dot.dim{background:#64748b;animation:none;}
+  @keyframes live-pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .live-timer{font-variant-numeric:tabular-nums;color:var(--text-muted);}
+  .persona-status{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);padding:2px 8px;border-radius:999px;background:rgba(148,163,184,0.12);}
+  .persona-status.running{color:#fbbf24;background:rgba(251,191,36,0.12);}
+  .persona-status.done{color:#10b981;background:rgba(16,185,129,0.12);}
+  .persona-live-body{margin-top:0.8rem;}
+  .live-round{margin-top:0.7rem;border-top:1px dashed rgba(148,163,184,0.15);padding-top:0.6rem;}
+  .live-round:first-child{border-top:none;padding-top:0;}
+  .live-round-label{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.3rem;}
+  .live-claim{font-size:0.9rem;color:var(--text-secondary);margin:0.25rem 0 0.4rem 0;padding-left:0.6rem;border-left:2px solid rgba(56,189,248,0.3);}
+  .live-claim-meta{font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem;padding-left:0.6rem;}
+  .event-log{max-height:220px;overflow-y:auto;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:0.78rem;color:var(--text-muted);margin-top:0.7rem;}
+  .event-log-entry{padding:0.15rem 0;}
+  .event-log-entry.ev-data{color:#38bdf8;}
+  .event-log-entry.ev-argument{color:#fbbf24;}
+  .event-log-entry.ev-timings{color:#a78bfa;}
+  .event-log-entry.ev-verdict{color:#10b981;}
+  .event-log-entry.ev-error{color:#ef4444;}
+</style>
+
+<script>
+(function(){
+  const JOB_ID = "{{ job_id }}";
+  const TICKER = "{{ ticker }}";
+  const RESULT_URL = "{% url 'debate-result' job_id %}";
+  const STREAM_URL = "{% url 'debate-stream' job_id %}";
+
+  const start = Date.now();
+  const timerEl = document.getElementById('live-timer');
+  const statusTextEl = document.getElementById('live-status-text');
+  const liveDot = document.getElementById('live-dot');
+  const errorCard = document.getElementById('error-card');
+  const errorMsg = document.getElementById('error-msg');
+  const logEl = document.getElementById('event-log');
+
+  const timerInterval = setInterval(()=>{
+    timerEl.textContent = Math.floor((Date.now()-start)/1000) + 's';
+  }, 1000);
+
+  function log(level, text){
+    const div = document.createElement('div');
+    div.className = 'event-log-entry ev-' + level;
+    const ts = Math.floor((Date.now()-start)/1000) + 's';
+    div.textContent = '[' + ts + '] ' + text;
+    logEl.prepend(div);
+  }
+
+  function setStatus(text){ statusTextEl.textContent = text; }
+
+  function setPersonaStatus(persona, status, label){
+    const el = document.querySelector('[data-persona-status="' + persona + '"]');
+    if (!el) return;
+    el.textContent = label || status;
+    el.className = 'persona-status ' + status;
+  }
+
+  function renderArgument(ev){
+    const persona = ev.persona;
+    const round = ev.round;
+    const arg = ev.argument || {};
+    const body = document.querySelector('[data-persona-body="' + persona + '"]');
+    if (!body) return;
+    const empty = body.querySelector('.claim-empty');
+    if (empty) empty.remove();
+
+    const roundDiv = document.createElement('div');
+    roundDiv.className = 'live-round';
+    const roundLabel = document.createElement('div');
+    roundLabel.className = 'live-round-label';
+    const confTxt = (typeof arg.confidence === 'number') ? arg.confidence.toFixed(2) : '—';
+    roundLabel.textContent = 'Round ' + round + ' · ' + (arg.stance || '—') + ' · conf ' + confTxt;
+    roundDiv.appendChild(roundLabel);
+
+    (arg.points || []).forEach(p => {
+      const claim = document.createElement('div');
+      claim.className = 'live-claim';
+      claim.textContent = p.claim || '';
+      roundDiv.appendChild(claim);
+      const bits = [];
+      if (p.cited_metric) bits.push(p.cited_metric);
+      if (p.source) bits.push(p.source);
+      if (bits.length){
+        const meta = document.createElement('div');
+        meta.className = 'live-claim-meta';
+        meta.textContent = bits.join(' · ');
+        roundDiv.appendChild(meta);
+      }
+    });
+    body.appendChild(roundDiv);
+    setPersonaStatus(persona, 'running', 'round ' + round);
+  }
+
+  function renderData(ev){
+    const s = ev.snapshot || {};
+    document.getElementById('company-name').textContent = s.company || TICKER;
+    if (s.price !== undefined) {
+      const ccy = s.currency === 'USD' ? '$' : (s.currency === 'INR' ? '₹' : '');
+      document.getElementById('price-value').textContent = ccy + s.price;
+    }
+    if (s.change_pct !== undefined) {
+      const c = document.getElementById('price-change');
+      c.textContent = Number(s.change_pct).toFixed(2) + '%';
+      c.className = 'price-change ' + (s.change_pct >= 0 ? 'positive' : 'negative');
+    }
+    const news = (ev.news || []).length;
+    const fil  = (ev.filings || []).length;
+    document.getElementById('snapshot-hint').textContent =
+      news + ' news item' + (news === 1 ? '' : 's') + ' · ' + fil + ' SEC filing' + (fil === 1 ? '' : 's') + ' loaded';
+  }
+
+  function showError(msg){
+    errorMsg.textContent = msg || 'Debate failed without a message.';
+    errorCard.style.display = 'block';
+    liveDot.classList.add('dim');
+    setStatus('failed');
+    clearInterval(timerInterval);
+  }
+
+  function finish(payload){
+    clearInterval(timerInterval);
+    liveDot.classList.add('dim');
+    if (payload && payload.error){ showError(payload.error); return; }
+    setStatus('done — loading verdict…');
+    setTimeout(() => { window.location.replace(RESULT_URL); }, 600);
+  }
+
+  const source = new EventSource(STREAM_URL);
+  setStatus('streaming');
+
+  source.onmessage = (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); }
+    catch (err) { log('error', 'bad json: ' + e.data); return; }
+    const t = ev.type;
+    if (t === 'data') {
+      log('data', 'Snapshot + ' + (ev.news||[]).length + ' news + ' + (ev.filings||[]).length + ' filings');
+      renderData(ev);
+    } else if (t === 'argument') {
+      log('argument', 'Round ' + ev.round + ' ' + ev.persona + ' → ' + ((ev.argument||{}).stance || '—'));
+      renderArgument(ev);
+    } else if (t === 'timings') {
+      log('timings', 'Total ' + ((ev.timings||{}).total || '?') + 's');
+    } else if (t === 'verdict') {
+      log('verdict', 'Chair → ' + ((ev.verdict||{}).verdict || '—'));
+      ['bull','bear','neutral'].forEach(p => setPersonaStatus(p, 'done', 'done'));
+    } else if (t === 'error') {
+      log('error', ev.message || 'unknown error');
+    }
+  };
+
+  source.addEventListener('complete', (e) => {
+    let payload = null;
+    try { payload = JSON.parse(e.data); } catch (err) {}
+    source.close();
+    finish(payload);
+  });
+
+  source.onerror = () => {
+    setStatus('reconnecting…');
+    liveDot.classList.add('dim');
+  };
+
+  window.addEventListener('beforeunload', () => { source.close(); });
+})();
+</script>
+
+{% endblock %}
